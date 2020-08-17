@@ -1,0 +1,303 @@
+#
+# Filename:     NZ_funcs
+# Description:  汎用的な関数記述ファイル
+# ChangeLog:
+#	2005/12/08 kagetani<h.kagetani@teijin.co.jp>
+#		* IsHonbanMachine()	本番機判定関数追加
+#	2015/07/24 UH1
+#		* InfoLog()		ログ警告での出力を廃止
+#		* WarnLog(), ErrorLog() ログ警告での出力からシステムログへの出力に変更
+#
+#	2017/12/21 UH1
+#		* cOutput_applog()			added
+#		* cIs_mounted()				added
+#		* cIs_numeric()				added
+#		* cDel_blank_and_coment()	added
+#		* cIsReapyear()				added
+#	2017/12/25 UH1
+#		* cCheck_ServiceFlg()		added
+#	2018/09/27 UH1
+#		* cOutput_applog()			出力文字列が全ての引数となるように$1から"$@"に変更
+#
+###############################################################################
+
+. /home/ifc/shell/NZ_config
+
+###############################################################################
+# 既存 NZ_funcs内定義関数
+###############################################################################
+
+#-------------------------
+# 本番機かどうかを判定する
+# retval 1: 本番機ではない
+#        0: 本番機である
+#-------------------------
+IsHonbanMachine() {
+  myhost=`hostname`
+  for h in $HOSTNAME_HONBAN; do 
+    if [ $myhost == $h ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+#-------------------------
+# ファイルの所有者名取得
+# $1: ファイル名
+#-------------------------
+GetFileOwner() {
+  ls -l $1 | while read perm nlink owner group other; do
+    echo $owner
+  done
+}
+
+#-------------------------
+# ファイルの所有者とグループを取得
+# $1: ファイル名
+#-------------------------
+GetFileOwnerAndGroup() {
+  ls -l $1 | while read perm nlink owner group other; do
+    echo $owner:$group
+  done
+}
+
+
+#-------------------------
+# ファイルのパーミッション番号を取得
+# $1: ファイル名
+#-------------------------
+GetFilePermissionNumber() {
+  local perm=`ls -l $1`
+  local num=0
+  for((i=1;i<10;i++)); do
+    let num=num*2
+    [ ${perm:$i:1} != '-' ] && let num++
+  done
+  printf '%o' $num
+}
+
+#-------------------------
+# 情報ログ出力
+# $1: プログラム名
+# $2: メッセージ
+#-------------------------
+InfoLog() {
+  if [ $# != 2 ]; then
+    return
+  fi
+  progbase=$(basename $1)
+  prog=${progbase%%.*}
+
+  message="INFO $2"
+  date +"%Y/%m/%d %H:%M:%S $message"
+}
+
+#-------------------------
+# 警告ログ出力
+# $1: プログラム名
+# $2: メッセージ
+#-------------------------
+WarnLog() {
+  if [ $# != 2 ]; then
+    return
+  fi
+  progbase=$(basename $1)
+  prog=${progbase%%.*}
+
+  message="WARN $2"
+  date +"%Y/%m/%d %H:%M:%S $message"
+  logger -p 'user.warning' "[${prog}] $2"
+}
+
+#-------------------------
+# エラーログ出力
+# $1: プログラム名
+# $2: メッセージ
+#-------------------------
+ErrorLog() {
+  if [ $# != 2 ]; then
+    return
+  fi
+  progbase=$(basename $1)
+  prog=${progbase%%.*}
+
+  message="ERR  $2"
+  date +"%Y/%m/%d %H:%M:%S $message"
+  logger -p 'user.err' "[${prog}] $2"
+}
+
+#----------
+# 起動ユーザチェック
+# $1 ... 許可ユーザ名(スペース区切りで複数指定可)
+#----------
+CheckUser() {
+    for u in $1; do
+        if [ "$USER" == "$u" ]; then
+            return 0
+        fi
+    done
+    echo "$USER による操作は許可されていません。"
+    return 1
+}
+
+###############################################################################
+# 新設定義関数 NewFuncs
+###############################################################################
+
+#------------------------------------------------------------------------
+# 汎用アプリログ出力関数
+# ログが30000行数まで到達したらローテートし2世代まで保持 ←　無効中
+#
+# param     $@:ログ出力文字列
+#
+# retval     0:正常出力
+#        other:内部エラー
+#
+#------------------------------------------------------------------------
+cOutput_applog() {
+	local MSG_STR="$@"
+
+	if [ ! -f ${NZ_LOGFILE} ]; then
+		touch ${NZ_LOGFILE}
+	fi
+
+	# 自前ログメンテナンス
+#	local LOG_LIMIT=30000
+#	local LINE_CNT=`cat ${NZ_LOGFILE} | wc -l`
+#	if [ ${LINE_CNT} -ge ${LOG_LIMIT} ]; then
+#		cp -f ${NZ_LOGFILE} ${NZ_LOGFILE}.old
+#		cat /dev/null > ${NZ_LOGFILE}
+#	fi
+
+	local E_DATE=`date +"%Y-%m-%d %H:%M:%S.%3N"`
+	echo "${E_DATE} ${APP_NAME}: ${MSG_STR}" >> ${NZ_LOGFILE}
+}
+
+#------------------------------------------------------------------------
+# 指定したディレクトリに何かがマウントされているか調べる
+# mountpointコマンドが無い時に使う
+#
+# param     $1:検査文字列
+#
+# retval     0:マウントしている
+#            1:マウントされていない
+#          255:ディレクトリが存在しない
+#------------------------------------------------------------------------
+cIs_mounted() {
+    local TGT_MNT_PONT=$1
+    local RET_VAL=1
+
+    if [ ! -d ${TGT_MNT_PONT} ]; then
+        RET_VAL=255
+    elif [ `stat -c %d ${TGT_MNT_PONT}/. 2>/dev/null` \
+          -ne `stat -c %d ${TGT_MNT_PONT}/.. 2>/dev/null` ]; then
+        RET_VAL=0
+    fi
+
+    # mounted -> 0 , not mounted -> 1 , no exist -> 255
+    return ${RET_VAL}
+}
+
+#------------------------------------------------------------------------------
+# 入力された文字列が数値かを調べる
+#
+# param     $1:検査文字列
+#
+# retval     0:数値
+#            1:数値以外
+#------------------------------------------------------------------------------
+cIs_numeric() {
+	local ARG=$1
+	local RET_VAL=255
+
+	expr ${ARG} + 1 >/dev/null 2>&1
+	if [ $? -ge 2 ]; then
+		RET_VAL=1
+	else
+		RET_VAL=0
+	fi
+
+	# numeric -> 0 , not numeric -> 1 
+	return $RET_VAL
+}
+
+#--------------------------------------------------------------------
+# 入力されたファイルからコメント行(#以降の文字列)と空白行と空白文字
+# を削除して標準出力に表示
+#
+# param $1:表示対象ファイル
+#
+# retval 0:正常終了
+#        1:表示対象ファイルが存在しない
+#    other:内部エラー
+#--------------------------------------------------------------------
+cDel_blank_and_coment() {
+	local TGT_FILE=$1
+	local RET_VAL=255
+
+	if [ -f ${TGT_FILE} ]; then
+		cat ${TGT_FILE} | sed -e 's/#.*//' -e '/^[\s\t]*$/d' -e 's/ //g'
+		RET_VAL=$?
+	else
+		RET_VAL=1
+	fi
+
+	return ${RET_VAL}
+}
+
+#------------------------------------------------------------------------------
+# 入力された年(YYYY)が閏年か調べる
+#
+# param     $1:検査文字列
+#
+# retval     0:閏年である
+#            1:閏年ではない
+#          255:数値以外の入力
+#------------------------------------------------------------------------------
+cIsReapyear() {
+	local ARG_YEAR=$1
+	local RET_VAL=255
+
+	cIs_numeric ${ARG_YEAR}
+	RESULT=$?
+
+	if [ ${RESULT} -ne 0 ]; then
+		# 数値以外なのでエラー
+		RET_VAL=255
+	elif [ `expr ${ARG_YEAR} % 4` -ne 0 -o \
+	       `expr ${ARG_YEAR} % 100` -eq 0 -a `expr ${ARG_YEAR} % 400` -ne 0 ]; then
+		# 閏年ではない
+		RET_VAL=1
+	else
+		# 閏年である
+		RET_VAL=0
+	fi
+
+	return ${RET_VAL}
+}
+
+#------------------------------------------------------------------------------
+# サーバ提供サービスフラグの有無を調べ、ストップフラグがある場合は正常終了する
+#
+# param       : none
+#
+# retval      : none
+#------------------------------------------------------------------------------
+cCheck_ServiceFlg () {
+        MONITOR_STOP_FLG_FILE=${MONITOR_STOP_FLG_FILE:-/home/ifc/lock/service_stopped}
+	local RET_VAL=0
+
+        if [ -f ${MONITOR_STOP_FLG_FILE} ]; then
+		
+                cOutput_applog "Info : サービス停止中"
+		cOutput_applog "${APP_NAME} 終了 (RC=${RET_VAL})"
+                echo ${RET_VAL}
+                exit ${RET_VAL}
+        fi
+}
+
+#
+## End of file.
+
+
