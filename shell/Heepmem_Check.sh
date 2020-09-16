@@ -78,6 +78,32 @@ fLockExecCmds() {
   }
 }
 
+# 使用法
+fUsage() {
+  local SCRIPT_NAME=`basename $0`
+  echo "" 1>&2
+  echo "Usage: ${SCRIPT_NAME} [-h] <inst1|inst2>" 1>&2
+  echo "" 1>&2
+  echo "ex1) ${SCRIPT_NAME} -h" 1>&2
+  echo "ex2) ${SCRIPT_NAME} inst1" 1>&2
+  echo "" 1>&2
+  echo "Options:" 1>&2
+  echo "  -h, --help" 1>&2
+  echo "" 1>&2
+}
+
+# Old使用率チェック
+fUsageRateCheck() {
+  local TOMCAT_INSTANCE=$1
+  # 対象プロセスID格納
+  TARGET_PSNUM=`ps -ef | grep -e ${PID1} -e ${PID2} | \
+                grep -e "${TOMCAT_INSTANCE}" | awk '{print $2}'`
+  # 対象プロセスの使用率確認
+  USE_RATE=`jstat -gcutil ${TARGET_PSNUM} | grep -v S0 | awk '{print $4}'`
+  # 使用率をechoする
+  echo "${USE_RATE}"
+}
+
 #---------------------------------------------------------------
 # Pre-processing
 #---------------------------------------------------------------
@@ -87,27 +113,11 @@ trap "fCleanUp" EXIT
 # 他のシグナルもtrapして終了メッセージ
 trap 'echo "255"; exit 255' 1 2 3 15
 
-# オプションチェック
-while getopts "hc:" flag; do
-  case $flag in
-    \?) OPT_ERROR=1; break;;
-    h)  OPT_ERROR=1; break;;
-  esac
-done
-
-shift $(( $OPTIND -1 ))
-
-if [ $OPT_ERROR ]; then
-  fUsage
-  RC=9
-  echo "RC=${RC}"
-  exit ${RC}
-fi
-
 # 引数確認
 ARG_NUM=$#
 if [[ ${ARG_NUM} -ne 1 ]]; then
   RC=1
+  fUsage
   MSG="${APP_NAME} No arguments specified (${RC}) [PID:$$]"
   cOutput_applog "{MSG}"
   exit ${RC}
@@ -120,6 +130,7 @@ if [[ ${INST_NAME} = "inst1" -o ${INST_NAME} = "inst2" ]]; then
   cOutput_applog "${MSG}"
 else
   RC=1
+  fUsage
   MSG="${APP_NAME} Wrong argument (${RC}) [PID:$$]"
   cOutput_applog "${MSG}"
   exit ${RC}
@@ -139,20 +150,7 @@ PID1=${PID[0]}
 PID2=${PID[1]}
 
 # Old領域使用率チェック
-if [[ ${INST_NAME} = "inst1" ]]; then
-  # プロセス格納
-  TOMCAT_INST=`ps -ef | grep -e ${PID1} -e ${PID2} | \
-              grep -e "{INST_NAME}" | awk '{print $2}'`
-  # 使用率確認
-  USE_RATE=`jstat -gcutil ${TOMCAT_INST} | grep -v S0 | awk '{print $4}'`
-elif [[ ${INST_NAME} = "inst2" ]]; then
-  # プロセス格納
-    TOMCAT_INST=`ps -ef | grep -e ${PID1} -e ${PID2} | \
-              grep -e "{INST_NAME}" | awk '{print $2}'`
-  # 使用率確認
-  USE_RATE=`jstat -gcutil ${TOMCAT_INST} | grep -v S0 | awk '{print $4}'`
-fi
-echo "${USE_RATE}"
+fUsageRateCheck ${INST_NAME}
 
 #---------------------------------------------------------------
 # Processing Exit
