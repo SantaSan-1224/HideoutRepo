@@ -28,6 +28,20 @@ RETRY=30
 fCleanUp() {
   rm -f ${LOCKFILE} > /dev/null 2>&1
 
+# 使用法
+fUsage() {
+  local SCRIPT_NAME=`basename $0`
+  echo "" 1>&2
+  echo "Usage: ${SCRIPT_NAME} [-h] <inst1|inst2>" 1>&2
+  echo "" 1>&2
+  echo "    ex1) ${SCRIPT_NAME} -h" 1>&2
+  echo "    ex2) ${SCRIPT_NAME} inst1" 1>&2
+  echo "" 1>&2
+  echo "Options:" 1>&2
+  echo "    -h, --help" 1>&2
+  echo "" 1>&2
+}
+
 # 排他制御
 fLockExecCmds() {
   
@@ -72,6 +86,23 @@ fLockExecCmds() {
 trap "fCleanUp" EXIT
 # 他のシグナルもtrapして終了メッセージ
 trap 'echo "255"; exit 255' 1 2 3 15
+
+# オプションチェック
+while getopts "hc:" flag; do
+  case $flag in
+    \?) OPT_ERROR=1; break;;
+    h)  OPT_ERROR=1; break;;
+  esac
+done
+
+shift $(( $OPTIND -1 ))
+
+if [ $OPT_ERROR ]; then
+  fUsage
+  RC=9
+  echo "RC=${RC}"
+  exit ${RC}
+fi
 
 # 引数確認
 ARG_NUM=$#
