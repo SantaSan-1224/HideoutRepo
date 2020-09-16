@@ -78,20 +78,6 @@ fLockExecCmds() {
   }
 }
 
-# 使用法
-fUsage() {
-  local SCRIPT_NAME=`basename $0`
-  echo "" 1>&2
-  echo "Usage: ${SCRIPT_NAME} [-h] <inst1|inst2>" 1>&2
-  echo "" 1>&2
-  echo "ex1) ${SCRIPT_NAME} -h" 1>&2
-  echo "ex2) ${SCRIPT_NAME} inst1" 1>&2
-  echo "" 1>&2
-  echo "Options:" 1>&2
-  echo "  -h, --help" 1>&2
-  echo "" 1>&2
-}
-
 # Old使用率チェック
 fUsageRateCheck() {
   local TOMCAT_INSTANCE=$1
