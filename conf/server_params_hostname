@@ -1,0 +1,396 @@
+#######################################################################
+# Server Make Script Parameters
+#######################################################################
+
+# ------------------------
+# Server Check Control
+# ------------------------
+Mod_OsBasicFiles_enable=1
+Change_inode32_enable=1
+Change_KernelParameters_enable=1
+YumUpdate_enable=1
+Install_Basic_modules_enable=1
+Create_ExtDisk_enable=1
+Add_OsBaseUser_enable=1
+Make_InfraDir_enable=1
+Set_CronAndRcLocal_enable=1
+Update_motd_enable=1
+InstallSep_enable=1
+SetForApl_enable=1
+
+# ------------------------
+# OS User 
+# ------------------------
+OS_USER_LIST_FILE_NAME=osuser_${MY_HOSTNAME}.lst
+
+#######################################################################
+# Server Order Parameters
+#######################################################################
+
+# ------------------------
+# Server Order Parameters
+# must be updated !
+# ------------------------
+# vCPU数
+VCPU_NUM=2
+
+# 物理メモリ(GB)
+P_MEM=4
+
+# 仮想メモリ(GB)
+P_SWAP=4
+
+# ディスクdeviceの容量(GB)
+declare -A DISKSIZE_
+DISKSIZE_["/dev/sda"]=30
+DISKSIZE_["/dev/sdb"]=200
+
+# OSリリース
+#OS_RELEASE="Red Hat Enterprise Linux Server release 7.1 (Maipo)"
+OS_RELEASE="Red Hat Enterprise Linux Server release 7.4 (Maipo)"
+
+#######################################################################
+# Server Parameters
+#######################################################################
+
+# ------------------------
+# OS Basic Setting
+# ------------------------
+
+# サーバ名 
+# must be updated !
+SYSTEM_NAME="在宅TOMS 本番IoT受信サーバ(Private)#2"
+
+# OS基本設定
+declare -A OS_BASIC_PARAM_
+OS_BASIC_PARAM_["selinux"]="Disabled"
+OS_BASIC_PARAM_["timezone"]="Asia/Tokyo"
+OS_BASIC_PARAM_["locale"]="ja_JP.UTF-8"
+# GUI
+# must be updated !
+OS_BASIC_PARAM_["runlevel"]="graphical.target"
+# CUI
+# must be updated !
+#OS_BASIC_PARAM_["runlevel"]="multi-user.target"
+OS_BASIC_PARAM_["LogLevel"]="notice"
+
+OS_BASIC_PARAM_["kdump"]="/dev/mapper/VolGroup-lv_apl,/crash"
+
+# ------------------------
+# network関連パラメータ
+# must be updated !
+# ------------------------
+declare -A OS_NW_PARAM_
+OS_NW_PARAM_["inet"]="163.147.76.84/24"
+OS_NW_PARAM_["default_gw"]="163.147.76.1"
+OS_NW_PARAM_["search"]="ad.teijin.co.jp"
+OS_NW_PARAM_["nameserver"]="163.147.17.20,163.147.17.21"
+OS_NW_PARAM_["http_proxy"]="http://webproxy.intra.teijin.co.jp:80/"
+OS_NW_PARAM_["ntp"]="163.147.15.21"
+
+# ------------------------
+# 自動起動サービス
+# ------------------------
+declare -A OS_SERVICE_
+OS_SERVICE_["firewalld"]="masked"
+OS_SERVICE_["ip6tables"]="disabled"
+OS_SERVICE_["iptables"]="disabled"
+OS_SERVICE_["bluetooth"]="disabled"
+OS_SERVICE_["rngd"]="disabled"
+OS_SERVICE_["libvirtd"]="disabled"
+OS_SERVICE_["unbound"]="disabled"
+OS_SERVICE_["abrt-vmcore"]="disabled"
+OS_SERVICE_["abrt-xorg"]="disabled"
+OS_SERVICE_["avahi-daemon"]="disabled"
+OS_SERVICE_["iscsi"]="disabled"
+OS_SERVICE_["microcode"]="disabled"
+OS_SERVICE_["multipathd"]="disabled"
+OS_SERVICE_["systemd-readahead-collect"]="disabled"
+OS_SERVICE_["systemd-readahead-replay"]="disabled"
+OS_SERVICE_["sshd"]="enabled"
+OS_SERVICE_["vsftpd"]="enabled"
+OS_SERVICE_["telnet.socket"]="enabled"
+OS_SERVICE_["zabbix-agent"]="enabled"
+
+# ------------------------
+# Disk Parameters
+# ------------------------
+
+# システムDisk関連パラメータ
+declare -A SYSTEM_DISK_
+SYSTEM_DISK_[devname]=/dev/sda
+SYSTEM_DISK_[devlabel]=msdos
+SYSTEM_DISK_[vgname]=VgSystem01
+
+# 拡張Disk関連パラメータ
+# must be updated !
+declare -A EXT_DISK_
+EXT_DISK_[devname]=/dev/sdb
+EXT_DISK_[devlabel]=msdos
+#EXT_DISK_[devlabel]=gpt
+EXT_DISK_[vgname]=VgData01
+
+# 拡張Diskパーティション関連パラメータ
+# must be updated !
+# PatisionSize(GB),LV_Name,VG_Name,FileSystem,MountPoint
+declare -A EXT_DISK_PART_
+EXT_DISK_PART_[swap]="2GB,lv_swap,${EXT_DISK_[vgname]},swap,swap"
+EXT_DISK_PART_[apl]="10GB,lv_apl,${EXT_DISK_[vgname]},ext4,/apl"
+EXT_DISK_PART_[data]="150GB,lv_data,${EXT_DISK_[vgname]},ext4,/data"
+
+
+# ------------------------
+# Kernel Parameters
+# ------------------------
+
+# /etc/security/limits.conf に定義されるべきパラメータ
+# must be updated !
+declare -A KERNEL_LIMITS_
+KERNEL_LIMITS_["postgres_hard_nproc"]="postgres soft nproc 2047"
+KERNEL_LIMITS_["postgres_soft_nproc"]="postgres hard nproc 16384"
+KERNEL_LIMITS_["postgres_soft_nofile"]="postgres soft nofile 1024"
+KERNEL_LIMITS_["postgres_hard_nofile"]="postgres hard nofile 65536"
+KERNEL_LIMITS_["postgres_soft_stack"]="postgres soft stack 10240"
+
+# /etc/sysctl.conf に定義されるべきパラメータ
+# must be updated !
+declare -A KERNEL_SYSCTL_
+KERNEL_SYSCTL_["kernel.sem"]="250 32000 100 128"
+KERNEL_SYSCTL_["kernel.shmall"]="2097152"
+KERNEL_SYSCTL_["kernel.shmmax"]="2147483648"
+KERNEL_SYSCTL_["kernel.shmmni"]="4096"
+KERNEL_SYSCTL_["fs.file-max"]="6553600"
+KERNEL_SYSCTL_["net.ipv4.ip_local_port_rang"]="9000 65500"
+
+#KERNEL_SYSCTL_["net.core.rmem_default"]="262144"
+#KERNEL_SYSCTL_["net.core.rmem_max"]="4194304"
+#KERNEL_SYSCTL_["net.core.wmem_default"]="262144"
+#KERNEL_SYSCTL_["net.core.wmem_max"]="1048576"
+
+#######################################################################
+# Middleware Parameters
+#######################################################################
+
+# ------------------------
+# Installed Packages
+# ------------------------
+
+# yum install
+# must be updated !
+INSTALLED_PACKAGE_LIST=$(cat <<_EOS_
+telnet-server
+vsftpd
+openssh-server
+wget
+tcp_wrappers
+zabbix-agent
+_EOS_
+)
+
+# SEP
+SEP_ARCHIVE_NAME=SymantecEndpointProtection.zip
+
+
+# ------------------------
+# Zabbix-agt Setting
+# ------------------------
+
+ZABBIX_MGR_D="163.147.1.105"
+ZABBIX_MGR_P="163.147.1.100,163.147.1.101,163.147.1.105"
+
+declare -A ZABBIX_CONF_
+ZABBIX_CONF_["LogFile"]="/var/log/zabbix/zabbix_agentd.log"
+ZABBIX_CONF_["LogFileSize"]=10
+ZABBIX_CONF_["EnableRemoteCommands"]=1
+ZABBIX_CONF_["Server"]=${ZABBIX_MGR_D}
+ZABBIX_CONF_["ListenIP"]=`dirname ${OS_NW_PARAM_["inet"]}`
+ZABBIX_CONF_["ServerActive"]=${ZABBIX_MGR_D}
+ZABBIX_CONF_["Hostname"]=${MY_HOSTNAME}
+ZABBIX_CONF_["Timeout"]=10
+ZABBIX_CONF_["AllowRoot"]=1
+ZABBIX_CONF_["UnsafeUserParameters"]=1
+
+# メタ文字は無理です
+#ZABBIX_CONF_["UserParameter"]='chk.edb[*],/home/ifc/Tjms/NZ_Edblogin_chk.sh $1 $2'
+
+# ------------------------
+# vsftpd Conf
+# ------------------------
+declare -A VSFTPD_CONF_
+VSFTPD_CONF_["anonymous_enable"]="NO"
+VSFTPD_CONF_["pam_service_name"]="vsftpd"
+VSFTPD_CONF_["userlist_enable"]="YES"
+VSFTPD_CONF_["userlist_deny"]="NO"
+VSFTPD_CONF_["tcp_wrappers"]="YES"
+VSFTPD_CONF_["listen"]="YES"
+VSFTPD_CONF_["listen_ipv6"]="NO"
+
+
+# ------------------------
+# TCP_WRAPPERS Setting
+# ------------------------
+
+#
+# 拠点のIPアドレスレンジ
+#
+# must be updated !
+declare -A ACC_NW_RANGE_
+# 横浜
+ACC_NW_RANGE_["yokohama"]="163.147.217.0/255.255.255.0"
+# 霞が関
+ACC_NW_RANGE_["kasumigaseki"]="163.147.218.0/255.255.255.0"
+# 原宿
+ACC_NW_RANGE_["harajuku"]="163.147.221.0/255.255.255.0"
+# 特権管理システム
+ACC_NW_RANGE_["UserPrivilegeSpecification1"]="163.147.123.153/255.255.255.255"
+ACC_NW_RANGE_["UserPrivilegeSpecification2"]="163.147.123.154/255.255.255.255"
+
+#
+# アクセス制御アプリケーションと拠点の紐付け
+#
+
+# allow vsftpd
+# must be updated !
+HOST_ALLOW_FTP_BASE=$(cat <<_EOS_
+yokohama
+kasumigaseki
+harajuku
+_EOS_
+)
+
+# allow in.telnetd
+# must be updated !
+HOST_ALLOW_TELNET_BASE=$(cat <<_EOS_
+yokohama
+kasumigaseki
+harajuku
+_EOS_
+)
+
+# allow sshd
+# must be updated !
+HOST_ALLOW_SSH_BASE=$(cat <<_EOS_
+yokohama
+UserPrivilegeSpecification1
+UserPrivilegeSpecification2
+_EOS_
+)
+
+# deny ALL
+HOST_DENY_ALL=$(cat <<_EOS_
+ALL
+_EOS_
+)
+
+# ------------------------
+# pam
+# ------------------------
+
+# /etc/security/access.confに追記するもの
+SECURITY_ACCESS_LIST=$(cat <<_EOS_
++:root:cron crond :0 tty1 tty2 tty3 tty4 tty5 tty6
++:aplusr:ALL
++:ifc:ALL
++:vncuser:ALL
+-:ALL:ALL
+_EOS_
+)
+
+#################################################################################################
+# Operation and Mentenance Setting
+#################################################################################################
+
+# ---------------------------------
+# Infra Directories
+# must be updated !
+# ---------------------------------
+declare -A NZ_DIRECTORY_
+NZ_DIRECTORY_["/home/ifc/Tjms"]="777,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc"]="777,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/lock"]="400,root:root"
+NZ_DIRECTORY_["/home/ifc/perf"]="755,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/RscTools"]="775,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/log"]="775,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/log/shell"]="775,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/log/job"]="775,nuser:nuser"
+NZ_DIRECTORY_["/home/ifc/perf"]="775,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/shell"]="775,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/tmp"]="775,ifc:ifc"
+NZ_DIRECTORY_["/home/ifc/job"]="755,nuser:nuser"
+NZ_DIRECTORY_["/home/ifc/perf/sa"]="755,root:root"
+NZ_DIRECTORY_["/home/ifc/perf/ps"]="755,root:root"
+NZ_DIRECTORY_["/home/ifc/perf/ps/{01..31}"]="755,root:root"
+NZ_DIRECTORY_["/home/ifc/perf/top"]="755,root:root"
+NZ_DIRECTORY_["/home/ifc/perf/top/{01..31}"]="755,root:root"
+NZ_DIRECTORY_["/home/ifc/perf/vmstat"]="755,root:root"
+NZ_DIRECTORY_["/home/ifc/perf/vmstat/{01..31}"]="755,root:root"
+
+# ---------------------------------
+# Infra Files
+# must be updated !
+# ---------------------------------
+declare -A NZ_FILE_
+NZ_FILE_["NZ_Edblogin_chk.sh"]="/home/ifc/Tjms,root:root,744"
+NZ_FILE_["NZ_Rscchk.sh"]="/home/ifc/RscTools,root:root,744"
+NZ_FILE_["NZ_sadc.sh"]="/home/ifc/RscTools,root:root,744"
+NZ_FILE_["NZ_CronKick.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["NZ_LogRotate.conf"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["NZ_LogRotate.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["NZ_Service_start.conf"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["NZ_Service_start.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["NZ_Service_stop.conf"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["NZ_Service_stop.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["NZ_StopFlagControl.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["NZ_StopFlagControl_server.conf"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["NZ_StopFlagControl_service.conf"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["NZ_StopFlagDelete.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["NZ_config"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["NZ_funcs"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["motd_upd2.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["scan_exclude.sh"]="/home/ifc/shell,root:root,744"
+NZ_FILE_["systemName.txt"]="/home/ifc/shell,root:root,644"
+NZ_FILE_["test.sh"]="/home/ifc/job,root:root,744"
+
+# ---------------------------------
+# CRON ,rc.local Entry 
+# must be updated !
+# ---------------------------------
+
+CRON_ENTRY_LIST=$(cat <<'_EOS_'
+MAILTO=""
+*/1 * * * * /home/ifc/shell/NZ_CronKick.sh RscTools/NZ_sadc.sh
+56 23 28-31 * * /home/ifc/shell/NZ_CronKick.sh RscTools/NZ_Rscchk.sh
+0 9 * * 1-6 /home/ifc/shell/NZ_CronKick.sh shell/NZ_StopFlagDelete.sh
+
+*/1 * * * *     ps aux --sort -rss >> /home/ifc/perf/ps/`date +'\%d'`/ps_`date +'\%Y\%m\%d-\%H\%M'`.log 2>&1
+*/1 * * * *     top -b -n 1 >> /home/ifc/perf/top/`date +'\%d'`/top_`date +'\%Y\%m\%d-\%H\%M'`.log 2>&1
+0 * * * *       vmstat 60 61 -t -n >> /home/ifc/perf/vmstat/`date +'\%d'`/vmstat_`date +'\%Y\%m\%d-\%H'`.log 2>&1 &
+_EOS_
+)
+
+RCLOCAL_ENTRY_LIST=$(cat <<'_EOS_'
+sleep 300
+su - root -c "/home/ifc/shell/NZ_StopFlagControl.sh server delete"
+_EOS_
+)
+
+#################################################################################################
+# Application Setting
+#################################################################################################
+
+# アプリケーションバッチユーザ
+# must be updated !
+APL_USER_ID=toms
+
+# apladmがsudo -u <USER>で指定できるユーザの定義
+# must be updated !
+RUNAS_ALIAS_APL=${APL_USER_ID}
+
+# ディレクトリ権限の指定
+# must be updated !
+# FORMAT [DirectoryName=permition,owneruid:ownergid]
+declare -A APL_DIRECTORY_
+APL_DIRECTORY_["/apl"]="775,${APL_USER_ID}:${APL_USER_ID}"
+
+#
+## End of File.
