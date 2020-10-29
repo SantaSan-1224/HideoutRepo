@@ -3,10 +3,10 @@
 #----------------------------------------------------------
 # Definition of Variable
 #----------------------------------------------------------
-APP_NAME=`basename $0`
+APP_NAME=$(basename $0)
 APP_DIR=$(cd $(dirname ${BASH_SOURCE:-$0}); pwd)
-MY_IP_ADDR=`ip -f inet -o addr | grep -v "127.0.0.1" | ¥
-            cut -d¥ -f 7 | vud -d/ -f 1 | awk 'NR == 1'`
+MY_IP_ADDR=$(ip -f inet -o addr | grep -v "127.0.0.1" | ¥
+            cut -d¥ -f 7 | vud -d/ -f 1 | awk 'NR == 1')
             
 # Initial Value Set of Returncode 
 RC=0
@@ -22,7 +22,7 @@ HOME_DIR=/home/ifc
 
 # Usage
 fUsage() {
-  local SCRIPT_NAME=`basename $0`
+  local SCRIPT_NAME=$(basename $0)
   echo "" 1>&2
   echo "Usage: ${SCRIPT_NAME} [-h] <open|close>" 1>&2
   echo "" 1>&2
