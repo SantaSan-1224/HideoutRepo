@@ -16,7 +16,7 @@ APP_DIR=$(cd $(dirname ${BASH_SOURCE:-$0}); pwd)
 MY_HOSTNAME=`uname -n`	;readonly MY_HOSTNAME
 
 # 戻り値初期値
-RC=0
+RC=255
 
 # 共通関数・設定ファイル読込
 NZ_HOME_DIR=/home/ifc
@@ -25,6 +25,8 @@ NZ_TMP_DIR=${NZ_HOME_DIR}/tmp
 . ${NZ_LIB_DIR}/NZ_funcs
 . ${NZ_LIB_DIR}/${APP_NAME}.conf
 
+# チェックサムシェル
+NZ_CHKSUM_SHELL=/${NZ_HOME_DIR}/shell/NZ_ChackSum.sh
 
 #-----------------------------------------------------------------
 # 関数定義
@@ -41,13 +43,103 @@ fErrorEnd () {
 	exit ${RC}
 }
 
+# ファイルバックアップ
+fFileBackup() {
+	local TGT_FILE="$1"
+	local RC=0
+
+	if [[ ! -f ${TGT_FILE} ]]; then
+		cOutput_applog "${TGT_FILE}が存在しませんのでファイルのバックアップはしません。"
+		RC=255
+		return ${RC}
+	fi
+
+	local BK_FILE=$(dirname ${TGT_FILE})/$(basename ${TGT_FILE}).`date "+%Y%m%d"`
+
+	CMD="cp -p ${TGT_FILE} ${BK_FILE}"
+	cOutput_applog "FileBackup: ${CMD}"
+	eval "${CMD}"
+
+	# 無駄なバックアップは削除
+	LAST1_BK_FILE=`ls -1t ${TGT_FILE}.* | head -n 1`
+	LAST2_BK_FILE=`ls -1t ${TGT_FILE}.* | head -n 2 | tail -n 1`
+
+	if [[ ${LAST1_BK_FILE} != ${LAST2_BK_FILE} ]]; then
+		diff ${LAST1_BK_FILE} ${LAST2_BK_FILE} >/dev/null 2>&1
+		RESULT=$?
+		if [[ ${RESULT} -eq 0 ]]; then
+			MSG="Not Modified. remove ${LAST2_BK_FILE}"
+			cOutput_applog "${MSG}"
+			rm -f ${LAST2_BK_FILE}
+		fi
+	fi
+
+	return ${RC}
+
+}
+
 # SSL設定ファイル書き換え
 fModSslConf () {
 	local RC=0
 	local SSL_CONF=/etc/httpd/conf.d/ssl.conf
 	local EXCLUDE_CERTFILE_STR='^SSLCertificateFile'
 	local EXCLUDE_CHAINFILE_STR='^SSLCertificateChainFile'
+	
+	local RESULT1=`grep ${EXCLUDE_CERTFILE_STR} ${SSL_CONF} | wc -l`
+	local RESULT2=`grep ${EXCLUDE_CHAINFILE_STR} ${SSL_CONF} | wc -l`
 
+	if [[ ${RESULT1} -eq 1 ]] && [[ ${RESULT2} -eq 1 ]]; then
+		fFileBackup ${SSL_CONF}
+		local LAST_EXCLUDE_LINE1=`grep -e ${EXCLUDE_CERTFILE_STR} -n ${SSL_CONF} | \
+			sort -n | tail -1 | sed -e 's/:.*//g'`
+		sed -i -e 's/^SSLCertificateFile/#SSLCertificateFile/' ${SSL_CONF} && \
+			sed -i -e "${LAST_EXCLUDE_LINE1}a SSLCertificateFile ${SRV_CERTPATH}" \
+			${SSL_CONF}
+		local LAST_EXCLUDE_LINE2=`grep -e ${EXCLUDE_CHAINFILE_STR} -n ${SSL_CONF} | \
+			sort -n | tail -1 | sed -e 's/:.*//g'`
+		sed -i -e 's/^SSLCertificateChainFile/#SSLCertificateChainFile/' ${SSL_CONF} && \
+			sed -i -e "${LAST_EXCLUDE_LINE2}a SSLCertificateChainFile ${CNT_CERTPATH}" | \
+			${SSL_CONF}
+
+		# 確認
+		local CNF_EXCLUDE_STR1=`grep '^SSLCertificateFile' ${SSL_CONF} | cut -d ' ' -f 2`
+		local CNF_EXCLUDE_STR2=`grep '^SSLCertificateChainFile' ${SSL_CONF} | cut -d ' ' -f 2`
+
+		if [[ "${CNF_EXCLUDE_STR1}" = "${SRV_SERTPATH}" ]]; then
+			cOutput_applog "SSLCertificateFile Check OK!"
+		else
+			fErrorEnd "SSLCertificateFile Check NG!"
+		fi
+
+		if [[ "${CNF_EXCLUDE_STR2}" = "${CNT_CERTPATH}" ]]; then
+			cOutput_applog "SSLCertificateChainFile Check OK!"
+		else
+			fErrorEnd "SSLCertificateChainFile Check NG!"
+		fi
+
+	elif [[ ${RESULT1} -eq 1 ]] && [[ ${RESULT2} -eq 0 ]]; then
+		fFileBackup ${SSL_CONF}
+		local LAST_EXCLUDE_LINE=`grep -e ${EXCLUDE_CERTFILE_STR} -n ${SSL_CONF} | \
+			sort -n | tail -1 | sed -e 's/:.*//g'`
+		sed -i -e 's/^SSLCertificateFile/#SSLCertificateFile/' ${SSL_CONF} && \
+			sed -i -e "${LAST_EXCLUDE_LINE}a SSLCertificateFile ${SRV_CERTPATH}" \
+			${SSL_CONF}
+		
+		# 確認
+		local CNF_EXCLUDE_STR=`grep '^SSLCertificateFile' ${SSL_CONF} | cut -d ' ' -f 2`
+
+		if [[ "${CNF_EXCLUDE_STR}" = "${SRV_CERTPATH}" ]]; then
+			cOutput_applog "SSLCertificatFile Check OK!"
+		else
+			fErrorEnd "SSLCertificateFile Check NG!"
+		fi
+
+	else
+		fErrorEnd "設定ファイル(${SSL_CONF})に誤りがあります"
+	
+	fi
+
+}
 
 #-----------------------------------------------------------------
 # 事前処理
@@ -87,7 +179,7 @@ SRV_CERTPATH=${NZ_TMP_DIR}/${SRV_CERTFILE}
 if [[ -e ${SRV_CERTPATH } ]]; then
 	chmod 644 ${SRV_CERTPATH} && chown root:root ${SRV_CERTPATH}
 	
-	[[ $? -eq 0 ]] && mv ${SRV_CERTPATH} ${NZ_CSRDIR}/.
+	[[ $? -eq 0 ]] && mv -f ${SRV_CERTPATH} ${NZ_CSRDIR}/.
 fi
 
 # 中間証明書権限変更(更新ありのみ)
@@ -97,10 +189,40 @@ if [[ ${CNT_CERTFILE} -eq 1 ]]
 	if [[ -e ${CNT_CERTPATH} ]]; then
 		chmod 644 ${CNT_CERTPATH} && chown root:root ${CNT_CERTPATH}
 
-		[[ $? -eq 0 ]] && mv ${CNT_CERTPATH} ${NZ_CSRDIR}/.
+		[[ $? -eq 0 ]] && mv -f ${CNT_CERTPATH} ${NZ_CSRDIR}/.
 	fi
 
 fi
 
 # SSL設定ファイルの更新
 fModSslConf
+
+# 秘密鍵ファイル移動とパスフレーズ削除
+if [[ -e ${NZ_PRIV_NEWFILE} ]]; then
+	fFileBackup ${NZ_PRIVFILE}
+	RC=$?
+	if [[ ${RC} -eq 0 ]]; then
+		mv -f ${NZ_PRIV_NEWFILE} ${NZ_PRIVFILE}
+		RC=$?
+
+		if [[ ${RC} -eq 0 ]]; then
+			CMD="openssl rsa -in ${NZ_PRIVFILE} -out ${NZ_PRIVFILE} \
+				-passout pass:${NZ_PRIVKEYPWD}
+			cOutput_applog "${CMD}"
+			eval "${CMD}"
+			RC=$?
+			if [[ ${RC} -eq 0 ]]; then
+				${NZ_CHKSUM_SHELL} create
+			else
+				fErrorEnd "パスフレーズの削除失敗"
+			fi
+		fi
+	fi
+fi
+
+#-----------------------------------------------------------------
+# 事後処理
+#-----------------------------------------------------------------
+# 処理終了メッセージ
+cOutput_applog "${APP_NAME} 終了 (RC=${RC})"
+exit ${RC}
