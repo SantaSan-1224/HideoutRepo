@@ -1,31 +1,8 @@
 #
-# Filename:     NZ_funcs
+# Filename:     funcs
 # Description:  汎用的な関数記述ファイル
-# ChangeLog:
-#	2005/12/08 kagetani<h.kagetani@teijin.co.jp>
-#		* IsHonbanMachine()	本番機判定関数追加
-#	2015/07/24 UH1
-#		* InfoLog()		ログ警告での出力を廃止
-#		* WarnLog(), ErrorLog() ログ警告での出力からシステムログへの出力に変更
-#
-#	2017/12/21 UH1
-#		* cOutput_applog()			added
-#		* cIs_mounted()				added
-#		* cIs_numeric()				added
-#		* cDel_blank_and_coment()	added
-#		* cIsReapyear()				added
-#	2017/12/25 UH1
-#		* cCheck_ServiceFlg()		added
-#	2018/09/27 UH1
-#		* cOutput_applog()			出力文字列が全ての引数となるように$1から"$@"に変更
-#
-###############################################################################
 
-. /home/ifc/shell/NZ_config
-
-###############################################################################
-# 既存 NZ_funcs内定義関数
-###############################################################################
+. /home/shell/NZ_config
 
 #-------------------------
 # 本番機かどうかを判定する
@@ -141,13 +118,8 @@ CheckUser() {
     return 1
 }
 
-###############################################################################
-# 新設定義関数 NewFuncs
-###############################################################################
-
 #------------------------------------------------------------------------
 # 汎用アプリログ出力関数
-# ログが30000行数まで到達したらローテートし2世代まで保持 ←　無効中
 #
 # param     $@:ログ出力文字列
 #
@@ -161,14 +133,6 @@ cOutput_applog() {
 	if [ ! -f ${NZ_LOGFILE} ]; then
 		touch ${NZ_LOGFILE}
 	fi
-
-	# 自前ログメンテナンス
-#	local LOG_LIMIT=30000
-#	local LINE_CNT=`cat ${NZ_LOGFILE} | wc -l`
-#	if [ ${LINE_CNT} -ge ${LOG_LIMIT} ]; then
-#		cp -f ${NZ_LOGFILE} ${NZ_LOGFILE}.old
-#		cat /dev/null > ${NZ_LOGFILE}
-#	fi
 
 	local E_DATE=`date +"%Y-%m-%d %H:%M:%S.%3N"`
 	echo "${E_DATE} ${APP_NAME}: ${MSG_STR}" >> ${NZ_LOGFILE}
@@ -276,27 +240,6 @@ cIsReapyear() {
 
 	return ${RET_VAL}
 }
-
-#------------------------------------------------------------------------------
-# サーバ提供サービスフラグの有無を調べ、ストップフラグがある場合は正常終了する
-#
-# param       : none
-#
-# retval      : none
-#------------------------------------------------------------------------------
-cCheck_ServiceFlg () {
-        MONITOR_STOP_FLG_FILE=${MONITOR_STOP_FLG_FILE:-/home/ifc/lock/service_stopped}
-	local RET_VAL=0
-
-        if [ -f ${MONITOR_STOP_FLG_FILE} ]; then
-		
-                cOutput_applog "Info : サービス停止中"
-		cOutput_applog "${APP_NAME} 終了 (RC=${RET_VAL})"
-                echo ${RET_VAL}
-                exit ${RET_VAL}
-        fi
-}
-
 #
 ## End of file.
 
