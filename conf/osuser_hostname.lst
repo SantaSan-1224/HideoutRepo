@@ -7,16 +7,4 @@
 #------------------
 # インフラ用ユーザ
 #------------------
-ifc:teijin:1000:1000::/home/ifc:/bin/bash
-vncuser:pass@vnc:1002:1002::/home/vncuser:/bin/bash
-adm_priv:priV!579ifc:1202:1202::/home/adm_priv:/bin/bash
-adminfunc:Func123#tjg:1203:1203::/home/adminfunc:/bin/bash
-apladm:Apladm0:1300:1300::/home/apladm:/bin/bash
-aplusr:Aplusr0:1301:1301::/home/aplusr:/bin/bash
-nuser:pass@nuser:1800:1800::/home/nuser:/bin/bash
-
-#------------------
-# アプリケーション用ユーザ
-#------------------
-toms:toms:1400:1400::/apl/toms:/bin/bash
-enterprisedb:enterprisedb:1200:1200::/home/enterprisedb:/bin/bash
+test:test:1000:1000::/home/test:/bin/bash
