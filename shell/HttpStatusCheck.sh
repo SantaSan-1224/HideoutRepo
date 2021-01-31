@@ -13,8 +13,8 @@ RC=0
 
 # Set of Common Function and Environment Variable
 HOME_DIR=/home/ifc
-. ${HOME_DIR}/shell/NZ_config
-. ${HOME_DIR}/shell/NZ_funcs
+. ${HOME_DIR}/shell/config
+. ${HOME_DIR}/shell/funcs
 
 #----------------------------------------------------------
 # Function
