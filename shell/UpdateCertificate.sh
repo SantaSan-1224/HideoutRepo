@@ -19,14 +19,14 @@ MY_HOSTNAME=`uname -n`	;readonly MY_HOSTNAME
 RC=255
 
 # 共通関数・設定ファイル読込
-NZ_HOME_DIR=/home/ifc
-NZ_TMP_DIR=${NZ_HOME_DIR}/tmp
-. ${NZ_HOME_DIR}/shell/NZ_config
-. ${NZ_LIB_DIR}/NZ_funcs
-. ${NZ_LIB_DIR}/${APP_NAME}.conf
+HOME_DIR=/home
+TMP_DIR=${HOME_DIR}/tmp
+. ${HOME_DIR}/shell/config
+. ${HOME_DIR}/shell/funcs
+. ${HOME_DIR}/shell/${APP_NAME}.conf
 
 # チェックサムシェル
-NZ_CHKSUM_SHELL=/${NZ_HOME_DIR}/shell/NZ_ChackSum.sh
+CHKSUM_SHELL=/${HOME_DIR}/shell/ChackSum.sh
 
 #-----------------------------------------------------------------
 # 関数定義
@@ -173,7 +173,7 @@ CNT_CERTFILE=$2
 [ -n ${CNT_CERTFILE} ] && CNTCERT_ANSYN_FLG=1
 
 # フルパス
-SRV_CERTPATH=${NZ_TMP_DIR}/${SRV_CERTFILE}
+SRV_CERTPATH=${TMP_DIR}/${SRV_CERTFILE}
 
 # サーバ証明書権限変更・移動
 if [[ -e ${SRV_CERTPATH } ]]; then
@@ -184,12 +184,12 @@ fi
 
 # 中間証明書権限変更(更新ありのみ)
 if [[ ${CNT_CERTFILE} -eq 1 ]]
-	CNT_CERTPATH=${NZ_TMP_DIR}/${CNT_CERTFILE}
+	CNT_CERTPATH=${TMP_DIR}/${CNT_CERTFILE}
 
 	if [[ -e ${CNT_CERTPATH} ]]; then
 		chmod 644 ${CNT_CERTPATH} && chown root:root ${CNT_CERTPATH}
 
-		[[ $? -eq 0 ]] && mv -f ${CNT_CERTPATH} ${NZ_CSRDIR}/.
+		[[ $? -eq 0 ]] && mv -f ${CNT_CERTPATH} ${CSRDIR}/.
 	fi
 
 fi
@@ -198,21 +198,21 @@ fi
 fModSslConf
 
 # 秘密鍵ファイル移動とパスフレーズ削除
-if [[ -e ${NZ_PRIV_NEWFILE} ]]; then
-	fFileBackup ${NZ_PRIVFILE}
+if [[ -e ${PRIV_NEWFILE} ]]; then
+	fFileBackup ${PRIVFILE}
 	RC=$?
 	if [[ ${RC} -eq 0 ]]; then
-		mv -f ${NZ_PRIV_NEWFILE} ${NZ_PRIVFILE}
+		mv -f ${PRIV_NEWFILE} ${PRIVFILE}
 		RC=$?
 
 		if [[ ${RC} -eq 0 ]]; then
-			CMD="openssl rsa -in ${NZ_PRIVFILE} -out ${NZ_PRIVFILE} \
-				-passout pass:${NZ_PRIVKEYPWD}
+			CMD="openssl rsa -in ${PRIVFILE} -out ${PRIVFILE} \
+				-passout pass:${PRIVKEYPWD}
 			cOutput_applog "${CMD}"
 			eval "${CMD}"
 			RC=$?
 			if [[ ${RC} -eq 0 ]]; then
-				${NZ_CHKSUM_SHELL} create
+				${CHKSUM_SHELL} create
 			else
 				fErrorEnd "パスフレーズの削除失敗"
 			fi
