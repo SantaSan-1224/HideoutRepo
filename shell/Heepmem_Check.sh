@@ -10,12 +10,12 @@ APP_DIR=$(cd $(dirname ${BASH_SOURCE:-$0}); pwd)
 RC=0
 
 # 共通関数読込
-NZ_HOME_DIR=/home/ifc
-. ${NZ_HOME_DIR}/shell/NZ_config
-. ${NZ_HOME_DIR}/shell/NZ_funcs
+HOME_DIR=/home
+. ${HOME_DIR}/shell/config
+. ${HOME_DIR}/shell/funcs
 
 # 排他制御ロックファイル
-LOCKFILE=${NZ_TEMP_DIR:-/tmp}/${APP_NAME}.aplcmd.lock
+LOCKFILE=${TEMP_DIR:-/tmp}/${APP_NAME}.aplcmd.lock
 
 # ロックチェック リトライ回数
 RETRY=30
@@ -46,7 +46,7 @@ fUsage() {
 fLockExecCmds() {
   
   # 待ち時間を0.5秒にセット
-  local WAIT_TIME=80000
+  local WAIT_TIME=500000
   local LOCK_MODE=$1
   
   # ロックファイルの確認
