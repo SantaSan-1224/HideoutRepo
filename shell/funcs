@@ -2,7 +2,7 @@
 # Filename:     funcs
 # Description:  汎用的な関数記述ファイル
 
-. /home/shell/NZ_config
+. /home/test/shell/config
 
 #-------------------------
 # 本番機かどうかを判定する
