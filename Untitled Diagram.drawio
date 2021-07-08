@@ -1,6 +1,6 @@
-<mxfile modified="2021-07-08T11:39:48.150Z" host="app.diagrams.net" agent="5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36" etag="00uXngiC0ZcPv__6UJU3" version="14.8.4" type="github">
+<mxfile modified="2021-07-08T11:55:26.508Z" host="app.diagrams.net" agent="5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36" etag="tNDTFrei7mhymH8bWjZs" version="14.8.4" type="github">
   <diagram id="Ht1M8jgEwFfnCIfOTk4-" name="Page-1">
-    <mxGraphModel dx="1455" dy="812" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+    <mxGraphModel dx="1261" dy="704" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -24,6 +24,21 @@
         </mxCell>
         <mxCell id="PU_o0Ppcd1tU-wXAbMdE-10" value="&lt;font style=&quot;vertical-align: inherit&quot;&gt;&lt;font style=&quot;vertical-align: inherit ; font-size: 24px&quot;&gt;AWS&lt;br&gt;Cerfiticate&lt;br&gt;Manager&lt;br&gt;&lt;/font&gt;&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
           <mxGeometry x="450" y="660" width="71" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="PU_o0Ppcd1tU-wXAbMdE-11" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;elbow=vertical;startArrow=block;startFill=1;endFill=1;strokeColor=#545B64;rounded=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" target="PU_o0Ppcd1tU-wXAbMdE-7">
+          <mxGeometry width="100" relative="1" as="geometry">
+            <mxPoint x="110" y="320" as="sourcePoint" />
+            <mxPoint x="300" y="290" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="PU_o0Ppcd1tU-wXAbMdE-12" value="VPC" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=12;fontStyle=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc;strokeColor=#248814;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#AAB7B8;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="570" y="60" width="550" height="680" as="geometry" />
+        </mxCell>
+        <mxCell id="PU_o0Ppcd1tU-wXAbMdE-13" value="ap-northeast-1a" style="fillColor=none;strokeColor=#147EBA;dashed=1;verticalAlign=top;fontStyle=0;fontColor=#147EBA;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="590" y="100" width="520" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="PU_o0Ppcd1tU-wXAbMdE-14" value="ap-northeast-1c" style="fillColor=none;strokeColor=#147EBA;dashed=1;verticalAlign=top;fontStyle=0;fontColor=#147EBA;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="590" y="420" width="520" height="310" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
