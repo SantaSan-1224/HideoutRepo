@@ -10,12 +10,14 @@
     設定ファイルのパス
 .PARAMETER DestinationBucket
     転送先のS3バケット名
+.PARAMETER RootFolder
+    転送元のルートフォルダ（S3パス生成時に除外する部分、例: "\\fsx\share"）
 .PARAMETER LogPath
     ログファイルの保存先パス（デフォルト: カレントディレクトリ）
 .PARAMETER CsvPath
     CSVファイルの保存先パス（デフォルト: カレントディレクトリ）
 .EXAMPLE
-    .\FSxToS3Glacier.ps1 -ConfigPath "targets.csv" -DestinationBucket "my-archive-bucket"
+    .\FSxToS3Glacier.ps1 -ConfigPath "targets.csv" -DestinationBucket "my-archive-bucket" -RootFolder "\\fsx\share"
 #>
 
 param (
@@ -24,6 +26,9 @@ param (
     
     [Parameter(Mandatory=$true)]
     [string]$DestinationBucket,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$RootFolder,
     
     [Parameter(Mandatory=$false)]
     [string]$LogPath = ".\FSxToS3Glacier_$(Get-Date -Format 'yyyyMMdd_HHmmss').log",
@@ -59,18 +64,19 @@ function Write-Log {
 # CSVにエントリを追加する関数
 function Add-CsvEntry {
     param (
+        [DateTime]$ProcessDate,
         [string]$SourcePath,
+        [string]$SourceFileName,
         [string]$S3Path,
-        [string]$Status,
-        [string]$Message = ""
+        [long]$FileSize
     )
     
     $csvObject = [PSCustomObject]@{
-        Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        ProcessDate = $ProcessDate.ToString("yyyy-MM-dd")
         SourcePath = $SourcePath
+        SourceFileName = $SourceFileName
         S3Path = $S3Path
-        Status = $Status
-        Message = $Message
+        FileSize = $FileSize
     }
     
     $csvObject | Export-Csv -Path $CsvPath -Append -NoTypeInformation -Force
@@ -100,7 +106,7 @@ function Import-TargetConfig {
 function Process-File {
     param (
         [string]$FilePath,
-        [string]$S3KeyPrefix = ""
+        [string]$Type
     )
     
     if (-not (Test-Path -Path $FilePath -PathType Leaf)) {
@@ -109,14 +115,13 @@ function Process-File {
     }
     
     $fileInfo = Get-Item -Path $FilePath
+    $fileSize = $fileInfo.Length
+    $fileName = $fileInfo.Name
+    $sourcePath = $fileInfo.DirectoryName
+    $processDate = Get-Date
     
-    # S3キーを構築
-    $s3Key = ""
-    if ([string]::IsNullOrEmpty($S3KeyPrefix)) {
-        $s3Key = $fileInfo.Name
-    } else {
-        $s3Key = "$S3KeyPrefix/$($fileInfo.Name)"
-    }
+    # S3パスを構築（RootFolderを除外する）
+    $s3Key = $FilePath.Replace($RootFolder, "").TrimStart("\").Replace("\", "/")
     $s3Path = "s3://$DestinationBucket/$s3Key"
     
     Write-Log "ファイル処理: $FilePath -> $s3Path"
@@ -143,22 +148,16 @@ function Process-File {
             Write-Log "元ファイルを空にして拡張子を.arcに変更しました: $arcFilePath" -Type "INFO"
             
             # CSVに成功を記録
-            Add-CsvEntry -SourcePath $FilePath -S3Path $s3Path -Status "SUCCESS"
+            Add-CsvEntry -ProcessDate $processDate -SourcePath $sourcePath -SourceFileName $fileName -S3Path $s3Path -FileSize $fileSize
             return $true
         } else {
             Write-Log "アップロード失敗: $FilePath" -Type "ERROR"
             Write-Log "エラー: $uploadResult" -Type "ERROR"
-            
-            # CSVに失敗を記録
-            Add-CsvEntry -SourcePath $FilePath -S3Path $s3Path -Status "FAILED" -Message $uploadResult
             return $false
         }
     } catch {
         Write-Log "例外発生: $FilePath" -Type "ERROR"
         Write-Log "エラー: $($_.Exception.Message)" -Type "ERROR"
-        
-        # CSVに失敗を記録
-        Add-CsvEntry -SourcePath $FilePath -S3Path $s3Path -Status "FAILED" -Message $_.Exception.Message
         return $false
     }
 }
@@ -167,7 +166,7 @@ function Process-File {
 function Process-Folder {
     param (
         [string]$FolderPath,
-        [string]$S3KeyPrefix = ""
+        [string]$Type
     )
     
     if (-not (Test-Path -Path $FolderPath -PathType Container)) {
@@ -188,15 +187,13 @@ function Process-Folder {
     
     # 各ファイルを処理
     foreach ($file in $files) {
-        $relativePath = $file.FullName.Replace($FolderPath, "").TrimStart("\")
+        $processDate = Get-Date
+        $fileSize = $file.Length
+        $fileName = $file.Name
+        $sourcePath = $file.DirectoryName
         
-        # S3キーを構築
-        $s3Key = ""
-        if ([string]::IsNullOrEmpty($S3KeyPrefix)) {
-            $s3Key = $relativePath.Replace("\", "/")
-        } else {
-            $s3Key = "$S3KeyPrefix/$($relativePath.Replace('\', '/'))"
-        }
+        # S3パスを構築（RootFolderを除外する）
+        $s3Key = $file.FullName.Replace($RootFolder, "").TrimStart("\").Replace("\", "/")
         $s3Path = "s3://$DestinationBucket/$s3Key"
         
         Write-Log "ファイル処理: $($file.FullName) -> $s3Path"
@@ -224,22 +221,16 @@ function Process-Folder {
                 Write-Log "元ファイルを空にして拡張子を.arcに変更しました: $arcFilePath" -Type "INFO"
                 
                 # CSVに成功を記録
-                Add-CsvEntry -SourcePath $file.FullName -S3Path $s3Path -Status "SUCCESS"
+                Add-CsvEntry -ProcessDate $processDate -SourcePath $sourcePath -SourceFileName $fileName -S3Path $s3Path -FileSize $fileSize
             } else {
                 Write-Log "アップロード失敗: $($file.FullName)" -Type "ERROR"
                 Write-Log "エラー: $uploadResult" -Type "ERROR"
                 $failureCount++
-                
-                # CSVに失敗を記録
-                Add-CsvEntry -SourcePath $file.FullName -S3Path $s3Path -Status "FAILED" -Message $uploadResult
             }
         } catch {
             Write-Log "例外発生: $($file.FullName)" -Type "ERROR"
             Write-Log "エラー: $($_.Exception.Message)" -Type "ERROR"
             $failureCount++
-            
-            # CSVに失敗を記録
-            Add-CsvEntry -SourcePath $file.FullName -S3Path $s3Path -Status "FAILED" -Message $_.Exception.Message
         }
     }
     
@@ -255,13 +246,14 @@ function Start-Migration {
     }
     
     if (-not (Test-Path -Path $CsvPath)) {
-        $header = "Timestamp,SourcePath,S3Path,Status,Message"
+        $header = "ProcessDate,SourcePath,SourceFileName,S3Path,FileSize"
         Set-Content -Path $CsvPath -Value $header -Force
     }
     
     Write-Log "処理を開始します。"
     Write-Log "設定ファイル: $ConfigPath"
     Write-Log "転送先S3バケット: $DestinationBucket"
+    Write-Log "ルートフォルダ: $RootFolder"
     
     # AWS CLIの存在確認
     if (-not (Test-AwsCli)) {
@@ -285,33 +277,23 @@ function Start-Migration {
         }
         
         $path = $target.Path
-        $type = if ($target.Type) { $target.Type } else { "auto" }
-        $s3Prefix = if ($target.S3Prefix) { $target.S3Prefix } else { "" }
+        $type = if ($target.Type) { $target.Type } else { "" }
         
-        # パスのタイプを自動判定
-        if ($type -eq "auto") {
-            if (Test-Path -Path $path -PathType Container) {
-                $type = "folder"
-            } elseif (Test-Path -Path $path -PathType Leaf) {
-                $type = "file"
-            } else {
-                Write-Log "パスが存在しません: $path" -Type "ERROR"
-                continue
-            }
-        }
-        
-        # タイプに応じて処理
-        if ($type -eq "folder") {
-            Process-Folder -FolderPath $path -S3KeyPrefix $s3Prefix
-        } elseif ($type -eq "file") {
-            $result = Process-File -FilePath $path -S3KeyPrefix $s3Prefix
+        # パスのタイプを判定
+        if (Test-Path -Path $path -PathType Container) {
+            # フォルダ
+            Process-Folder -FolderPath $path -Type $type
+        } elseif (Test-Path -Path $path -PathType Leaf) {
+            # ファイル
+            $result = Process-File -FilePath $path -Type $type
             if ($result) {
                 $totalSuccessCount++
             } else {
                 $totalFailureCount++
             }
         } else {
-            Write-Log "不明なタイプ '$type' が指定されました: $path" -Type "ERROR"
+            Write-Log "パスが存在しません: $path" -Type "ERROR"
+            continue
         }
     }
     
