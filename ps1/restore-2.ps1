@@ -66,116 +66,21 @@ function Request-S3ObjectRestoration {
     }
 }
 
-# S3オブジェクトの復元状態を確認する関数
-function Get-S3ObjectRestorationStatus {
+# S3からのオブジェクト存在確認関数
+function Test-S3ObjectExists {
     param(
         [string]$S3Key
     )
     
     try {
         $command = "aws s3api head-object --bucket $S3BucketName --key `"$S3Key`" --profile Operation --endpoint-url $EndpointUrl"
-        $result = Invoke-Expression $command | ConvertFrom-Json
-        
-        if ($result.Restore) {
-            if ($result.Restore -match "ongoing-request=\"false\"") {
-                return "COMPLETED"
-            }
-            elseif ($result.Restore -match "ongoing-request=\"true\"") {
-                return "IN_PROGRESS"
-            }
+        $result = Invoke-Expression $command 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            return $true
         }
-        return "NOT_STARTED"
+        return $false
     }
     catch {
-        Write-Log "オブジェクト状態の確認に失敗しました: $($_.Exception.Message)" "ERROR"
-        return "ERROR"
-    }
-}
-
-# S3からオブジェクトをダウンロードしてFSxにコピーする関数
-function Copy-S3ObjectToFsx {
-    param(
-        [string]$S3Key,
-        [string]$FsxPath,
-        [string]$Type
-    )
-    
-    try {
-        # FSxパスの親ディレクトリを確認・作成
-        $parentDir = Split-Path -Parent $FsxPath
-        if (-not (Test-Path $parentDir)) {
-            New-Item -Path $parentDir -ItemType Directory -Force | Out-Null
-            Write-Log "ディレクトリを作成しました: $parentDir" "INFO"
-        }
-        
-        if ($Type -eq "file") {
-            # ファイルの場合、S3からダウンロードして直接コピー
-            $tempFile = [System.IO.Path]::GetTempFileName()
-            $command = "aws s3 cp s3://$S3BucketName/$S3Key `"$tempFile`" --profile Operation --endpoint-url $EndpointUrl"
-            Invoke-Expression $command
-            
-            # .arcファイルのチェック
-            $arcFilePath = "$FsxPath.arc"
-            if (Test-Path $arcFilePath) {
-                Remove-Item -Path $arcFilePath -Force
-                Write-Log ".arcファイルを削除しました: $arcFilePath" "INFO"
-            }
-            
-            # 元のファイルパスにコピー
-            Copy-Item -Path $tempFile -Destination $FsxPath -Force
-            Remove-Item -Path $tempFile -Force
-            Write-Log "ファイルを復元しました: $FsxPath" "INFO"
-        }
-        elseif ($Type -eq "folder") {
-            # フォルダの場合、S3のプレフィックスにマッチするすべてのオブジェクトをリスト
-            $command = "aws s3 ls s3://$S3BucketName/$S3Key/ --recursive --profile Operation --endpoint-url $EndpointUrl"
-            $objects = Invoke-Expression $command
-            
-            $totalObjects = 0
-            $restoredObjects = 0
-            
-            # オブジェクトごとに処理
-            foreach ($object in $objects) {
-                if ($object -match "\s+(\d+)\s+.+\s+(.+)$") {
-                    $objectKey = $Matches[2]
-                    $totalObjects++
-                    
-                    # S3からの相対パスをFSxパスに変換
-                    $relativePath = $objectKey.Substring($S3Key.Length).TrimStart('/')
-                    $targetFsxPath = Join-Path -Path $FsxPath -ChildPath ($relativePath -replace '/', '\')
-                    
-                    # .arcファイルのチェック
-                    $arcFilePath = "$targetFsxPath.arc"
-                    if (Test-Path $arcFilePath) {
-                        # 親ディレクトリを確認・作成
-                        $targetParentDir = Split-Path -Parent $targetFsxPath
-                        if (-not (Test-Path $targetParentDir)) {
-                            New-Item -Path $targetParentDir -ItemType Directory -Force | Out-Null
-                        }
-                        
-                        # S3からダウンロード
-                        $tempFile = [System.IO.Path]::GetTempFileName()
-                        $downloadCommand = "aws s3 cp s3://$S3BucketName/$objectKey `"$tempFile`" --profile Operation --endpoint-url $EndpointUrl"
-                        Invoke-Expression $downloadCommand
-                        
-                        # 元のファイルパスにコピー
-                        Copy-Item -Path $tempFile -Destination $targetFsxPath -Force
-                        Remove-Item -Path $tempFile -Force
-                        Remove-Item -Path $arcFilePath -Force
-                        
-                        $restoredObjects++
-                        Write-Log "フォルダ内ファイルを復元しました: $targetFsxPath" "INFO"
-                    }
-                }
-            }
-            
-            Write-Log "フォルダ復元完了: $FsxPath ($restoredObjects/$totalObjects ファイル)" "INFO"
-        }
-        
-        return $true
-    }
-    catch {
-        Write-Log "ファイル復元に失敗しました: $($_.Exception.Message)" "ERROR"
         return $false
     }
 }
@@ -196,6 +101,10 @@ try {
     
     # 復元ステータス追跡用のリスト
     $restoreStatus = @()
+    $totalRequestCount = 0
+    $successRequestCount = 0
+    $failedRequestCount = 0
+    $unfoundObjectCount = 0
     
     # 各対象ごとに処理
     foreach ($target in $restoreTargets) {
@@ -212,15 +121,40 @@ try {
         Write-Log "S3相対パス: $s3RelativePath" "DEBUG"
         
         if ($type -eq "file") {
-            # ファイルの復元リクエスト
-            $success = Request-S3ObjectRestoration -S3Key $s3RelativePath
-            if ($success) {
+            $totalRequestCount++
+            
+            # ファイルが存在するか確認
+            if (Test-S3ObjectExists -S3Key $s3RelativePath) {
+                # ファイルの復元リクエスト
+                $success = Request-S3ObjectRestoration -S3Key $s3RelativePath
+                if ($success) {
+                    $successRequestCount++
+                    $restoreStatus += [PSCustomObject]@{
+                        OriginalPath = $fsxPath
+                        S3Key = $s3RelativePath
+                        Type = $type
+                        RequestStatus = "Success"
+                        ObjectFound = "Yes"
+                    }
+                } else {
+                    $failedRequestCount++
+                    $restoreStatus += [PSCustomObject]@{
+                        OriginalPath = $fsxPath
+                        S3Key = $s3RelativePath
+                        Type = $type
+                        RequestStatus = "Failed"
+                        ObjectFound = "Yes"
+                    }
+                }
+            } else {
+                $unfoundObjectCount++
+                Write-Log "オブジェクトが見つかりません: s3://$S3BucketName/$s3RelativePath" "WARNING"
                 $restoreStatus += [PSCustomObject]@{
                     OriginalPath = $fsxPath
                     S3Key = $s3RelativePath
                     Type = $type
-                    RequestStatus = "Requested"
-                    CompletionStatus = "Pending"
+                    RequestStatus = "Not Requested"
+                    ObjectFound = "No"
                 }
             }
         }
@@ -237,27 +171,56 @@ try {
             Write-Log "フォルダ内のオブジェクトを検索しています..." "INFO"
             
             $objectCount = 0
+            $folderSuccessCount = 0
+            $folderFailedCount = 0
+            
             foreach ($object in $objects) {
                 if ($object -match "\s+(\d+)\s+.+\s+(.+)$") {
                     $objectKey = $Matches[2]
                     $objectCount++
+                    $totalRequestCount++
                     
                     # 各オブジェクトの復元リクエスト
                     $success = Request-S3ObjectRestoration -S3Key $objectKey
                     if ($success) {
+                        $successRequestCount++
+                        $folderSuccessCount++
                         $restoreStatus += [PSCustomObject]@{
                             OriginalPath = $fsxPath
                             S3Key = $objectKey
                             Type = "file"
-                            RequestStatus = "Requested"
-                            CompletionStatus = "Pending"
+                            RequestStatus = "Success"
+                            ObjectFound = "Yes"
+                            ParentFolder = $fsxPath
+                        }
+                    } else {
+                        $failedRequestCount++
+                        $folderFailedCount++
+                        $restoreStatus += [PSCustomObject]@{
+                            OriginalPath = $fsxPath
+                            S3Key = $objectKey
+                            Type = "file"
+                            RequestStatus = "Failed"
+                            ObjectFound = "Yes"
                             ParentFolder = $fsxPath
                         }
                     }
                 }
             }
             
-            Write-Log "フォルダ内の $objectCount 個のオブジェクトに対して復元リクエストを送信しました" "INFO"
+            if ($objectCount -eq 0) {
+                $unfoundObjectCount++
+                Write-Log "フォルダ内にオブジェクトが見つかりません: s3://$S3BucketName/$s3RelativePath" "WARNING"
+                $restoreStatus += [PSCustomObject]@{
+                    OriginalPath = $fsxPath
+                    S3Key = $s3RelativePath
+                    Type = $type
+                    RequestStatus = "Not Requested"
+                    ObjectFound = "No"
+                }
+            } else {
+                Write-Log "フォルダ内の $objectCount 個のオブジェクトに対して復元リクエストを送信しました (成功: $folderSuccessCount, 失敗: $folderFailedCount)" "INFO"
+            }
         }
         else {
             Write-Log "不明なタイプです: $type" "ERROR"
@@ -269,91 +232,81 @@ try {
     $restoreStatus | Export-Csv -Path $statusCsvPath -NoTypeInformation
     Write-Log "復元ステータスをCSVに出力しました: $statusCsvPath" "INFO"
     
-    # ステータス確認プロセスの開始
-    Write-Log "=== 復元ステータスの定期確認を開始します ===" "INFO"
-    Write-Log "このプロセスはバックグラウンドで動作し、復元が完了したオブジェクトを順次FSxに反映します" "INFO"
-    Write-Log "復元には数時間から最大12時間程度かかる場合があります" "INFO"
+    # 復元リクエスト結果の集計
+    $originalTargetCount = ($restoreTargets | Measure-Object).Count
+    $processedTargetCount = ($restoreStatus | Group-Object -Property OriginalPath | Measure-Object).Count
+    $successTargetCount = ($restoreStatus | Where-Object { $_.RequestStatus -eq "Success" } | Group-Object -Property OriginalPath | Measure-Object).Count
     
-    $pendingItems = $restoreStatus | Where-Object { $_.CompletionStatus -eq "Pending" }
-    $checkCount = 0
-    
-    while (($pendingItems | Measure-Object).Count -gt 0) {
-        $checkCount++
-        Write-Log "ステータス確認 #$checkCount - 残り $($pendingItems.Count) アイテム" "INFO"
-        
-        foreach ($item in $pendingItems) {
-            $status = Get-S3ObjectRestorationStatus -S3Key $item.S3Key
-            
-            if ($status -eq "COMPLETED") {
-                Write-Log "復元完了: $($item.S3Key)" "INFO"
-                
-                # FSxへのコピー
-                if ($item.ParentFolder) {
-                    # フォルダ内のアイテム
-                    $relativePath = $item.S3Key.Substring($s3RelativePath.Length).TrimStart('/')
-                    $targetFsxPath = Join-Path -Path $item.ParentFolder -ChildPath ($relativePath -replace '/', '\')
-                    Copy-S3ObjectToFsx -S3Key $item.S3Key -FsxPath $targetFsxPath -Type "file"
-                }
-                else {
-                    # 直接指定されたファイル
-                    Copy-S3ObjectToFsx -S3Key $item.S3Key -FsxPath $item.OriginalPath -Type $item.Type
-                }
-                
-                # ステータス更新
-                $item.CompletionStatus = "Completed"
-            }
-            elseif ($status -eq "ERROR") {
-                Write-Log "復元エラー: $($item.S3Key)" "ERROR"
-                $item.CompletionStatus = "Error"
-            }
-        }
-        
-        # 更新されたステータスをCSVに出力
-        $restoreStatus | Export-Csv -Path $statusCsvPath -NoTypeInformation
-        
-        # 次の確認までの待機
-        Write-Log "30分後に再確認します..." "INFO"
-        Start-Sleep -Seconds 1800  # 30分待機
-        
-        # 保留中のアイテムを再取得
-        $pendingItems = $restoreStatus | Where-Object { $_.CompletionStatus -eq "Pending" }
+    # 復元リクエスト突き合わせチェック
+    $missingTargets = $restoreTargets | Where-Object {
+        $targetPath = $_.Path
+        $processedTargets = $restoreStatus | Where-Object { $_.OriginalPath -eq $targetPath }
+        ($processedTargets | Measure-Object).Count -eq 0
     }
     
-    # 復元結果の集計
-    $completed = ($restoreStatus | Where-Object { $_.CompletionStatus -eq "Completed" } | Measure-Object).Count
-    $errors = ($restoreStatus | Where-Object { $_.CompletionStatus -eq "Error" } | Measure-Object).Count
-    $total = ($restoreStatus | Measure-Object).Count
+    $missingCount = ($missingTargets | Measure-Object).Count
     
-    Write-Log "=== 復元処理が完了しました ===" "INFO"
-    Write-Log "合計: $total アイテム" "INFO"
-    Write-Log "成功: $completed アイテム" "INFO"
-    Write-Log "エラー: $errors アイテム" "INFO"
-    Write-Log "詳細ステータス: $statusCsvPath" "INFO"
+    # 結果判定
+    $overallSuccess = ($missingCount -eq 0) -and ($successRequestCount -gt 0)
+    $resultStatus = if ($overallSuccess) { "成功" } else { "一部処理に問題あり" }
     
     # 復元結果レポートの作成
     $reportPath = "$PSScriptRoot\restore_report_$(Get-Date -Format 'yyyyMMddHHmmss').txt"
     @"
-=== S3 Glacier Deep Archive 復元レポート ===
+=== S3 Glacier Deep Archive 復元リクエストレポート ===
 実行日時: $(Get-Date -Format "yyyy/MM/dd HH:mm:ss")
 
-【復元結果サマリー】
-合計処理対象: $total アイテム
-復元成功: $completed アイテム
-復元失敗: $errors アイテム
+【処理結果】
+総合判定: $resultStatus
 
-【詳細】
-詳細なステータス情報は以下のCSVファイルを参照してください:
-$statusCsvPath
+【入力CSVファイル】
+読み込んだCSVファイル: $CsvFilePath
+CSVファイル内の復元対象数: $originalTargetCount 件
+
+【処理結果サマリー】
+処理された復元対象数: $processedTargetCount 件
+正常に復元リクエストが完了した対象数: $successTargetCount 件
+処理されなかった対象数: $missingCount 件
+
+【詳細統計】
+送信された復元リクエスト総数: $totalRequestCount 件
+成功した復元リクエスト数: $successRequestCount 件
+失敗した復元リクエスト数: $failedRequestCount 件
+見つからなかったオブジェクト数: $unfoundObjectCount 件
+
+【注意事項】
+・復元リクエストが完了しても、実際のファイル復元には最大48時間かかる場合があります
+・復元が完了すると、FSx上の.arcファイルは自動的に元のファイルに戻ります
+・復元リクエストの詳細は以下のCSVファイルを参照してください:
+  $statusCsvPath
 
 【復元ログ】
 詳細なログは以下のファイルを参照してください:
 $PSScriptRoot\restore_log_$(Get-Date -Format 'yyyyMMdd').log
 "@ | Out-File -FilePath $reportPath -Encoding utf8
     
-    Write-Log "復元レポートを作成しました: $reportPath" "INFO"
+    # 処理されなかった対象がある場合は追記
+    if ($missingCount -gt 0) {
+        "【処理されなかった対象】" | Out-File -FilePath $reportPath -Encoding utf8 -Append
+        foreach ($missing in $missingTargets) {
+            "・$($missing.Path) ($($missing.Type))" | Out-File -FilePath $reportPath -Encoding utf8 -Append
+        }
+        "`n処理されなかった対象については、パスの指定が正しいか、S3に対応するオブジェクトが存在するかを確認してください。" | Out-File -FilePath $reportPath -Encoding utf8 -Append
+    }
+    
+    Write-Log "復元リクエストレポートを作成しました: $reportPath" "INFO"
     
     # レポート表示
     Get-Content $reportPath
+    
+    # スクリプトの終了コードを設定
+    if ($overallSuccess) {
+        Write-Log "復元リクエスト処理が正常に完了しました" "INFO"
+        exit 0
+    } else {
+        Write-Log "一部の復元リクエスト処理に問題がありました" "WARNING"
+        exit 1
+    }
 }
 catch {
     Write-Log "予期せぬエラーが発生しました: $($_.Exception.Message)" "ERROR"
