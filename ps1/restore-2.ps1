@@ -7,17 +7,13 @@ param(
     [string]$CsvFilePath,  # 復元対象のパスが記載されたCSVファイルパス
     
     [Parameter(Mandatory=$true)]
-    [string]$S3BucketName,  # S3バケット名 (s3://の後の部分)
-    
-    [Parameter(Mandatory=$true)]
-    [string]$EndpointUrl,   # S3エンドポイントURL
-    
-    [Parameter(Mandatory=$false)]
-    [string]$RetrievalTier = "Standard",  # 復元速度 (Standard, Bulk, Expedited)
-    
-    [Parameter(Mandatory=$false)]
-    [int]$DaysValid = 7     # 復元後のオブジェクトの有効日数
+    [string]$S3BucketName   # S3バケット名 (s3://の後の部分)
 )
+
+# 固定値の設定
+$EndpointUrl = "https://s3.ap-northeast-1.amazonaws.com"  # VPCエンドポイントURL（環境に合わせて変更してください）
+$RetrievalTier = "Bulk"  # 復元速度は Bulk に固定
+$DaysValid = 30          # 復元後のオブジェクトの有効日数は 30日 に固定
 
 # ログ出力関数
 function Write-Log {
@@ -55,9 +51,7 @@ function Convert-FsxPathToS3Path {
 # S3オブジェクトの復元リクエストを送信する関数
 function Request-S3ObjectRestoration {
     param(
-        [string]$S3Key,
-        [string]$RetrievalTier,
-        [int]$DaysValid
+        [string]$S3Key
     )
     
     $restoreRequest = @"
@@ -230,7 +224,7 @@ try {
         
         if ($type -eq "file") {
             # ファイルの復元リクエスト
-            $success = Request-S3ObjectRestoration -S3Key $s3RelativePath -RetrievalTier $RetrievalTier -DaysValid $DaysValid
+            $success = Request-S3ObjectRestoration -S3Key $s3RelativePath
             if ($success) {
                 $restoreStatus += [PSCustomObject]@{
                     OriginalPath = $fsxPath
@@ -260,7 +254,7 @@ try {
                     $objectCount++
                     
                     # 各オブジェクトの復元リクエスト
-                    $success = Request-S3ObjectRestoration -S3Key $objectKey -RetrievalTier $RetrievalTier -DaysValid $DaysValid
+                    $success = Request-S3ObjectRestoration -S3Key $objectKey
                     if ($success) {
                         $restoreStatus += [PSCustomObject]@{
                             OriginalPath = $fsxPath
