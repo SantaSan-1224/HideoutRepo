@@ -12,8 +12,6 @@ param(
 
 # 固定値の設定
 $EndpointUrl = "https://s3.ap-northeast-1.amazonaws.com"  # VPCエンドポイントURL（環境に合わせて変更してください）
-$RetrievalTier = "Bulk"  # 復元速度は Bulk に固定
-$DaysValid = 30          # 復元後のオブジェクトの有効日数は 30日 に固定
 
 # ログ出力関数
 function Write-Log {
@@ -54,17 +52,8 @@ function Request-S3ObjectRestoration {
         [string]$S3Key
     )
     
-    $restoreRequest = @"
-{
-    "Days": $DaysValid,
-    "GlacierJobParameters": {
-        "Tier": "$RetrievalTier"
-    }
-}
-"@
-    
     try {
-        $command = "aws s3api restore-object --bucket $S3BucketName --key `"$S3Key`" --restore-request '$restoreRequest' --profile Operation --endpoint-url $EndpointUrl"
+        $command = "aws s3api restore-object --bucket $S3BucketName --key `"$S3Key`" --restore-request 'Days:30,GlacierJobParameters:{`"Tier`":`"Bulk`"}' --profile Operation --endpoint-url $EndpointUrl"
         Write-Log "実行コマンド: $command" "DEBUG"
         
         $result = Invoke-Expression $command
