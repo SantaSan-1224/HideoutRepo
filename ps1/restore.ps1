@@ -1,17 +1,17 @@
 <#
 .SYNOPSIS
-    S3 Glacier Deep ArchiveからFSxへファイルを復元するスクリプト
+    S3 Glacier Deep Archiveに保存されたオブジェクトの復元リクエストを行うスクリプト
 .DESCRIPTION
     このスクリプトはS3 Glacier Deep Archiveに保存されたオブジェクトの復元リクエストを行います。
-    復元元のS3パスはFSxパスから自動的に導出されます。
+    復元リクエスト対象のS3パスはFSxパス形式から自動的に導出されます。
 .PARAMETER ConfigPath
     設定ファイルのパス
 .PARAMETER SourceBucket
-    復元元のS3バケット名
+    復元リクエスト対象のS3バケット名
 .PARAMETER RootFolder
-    復元先のルートフォルダ（例: "\\fsx\share"）
+    パス変換のベースとなるルートフォルダパス（例: "\\fsx\share"）
 .PARAMETER Days
-    復元したオブジェクトを保持する日数（デフォルト: 7）
+    復元したオブジェクトをS3内に保持する日数（デフォルト: 7）
 .PARAMETER Tier
     復元リクエストのティア（Standard/Bulk/Expedited、デフォルト: Standard）
 .PARAMETER LogPath
@@ -62,7 +62,7 @@ function Write-Log {
     $logMessage = "[$timestamp] [$Type] $Message"
     
     Write-Host $logMessage
-    Add-Content -Path $LogPath -Value $logMessage
+    Add-Content -Path $LogPath -Value $logMessage -Encoding UTF8
 }
 
 # 設定ファイルを読み込む関数
@@ -77,33 +77,50 @@ function Import-TargetConfig {
     }
     
     try {
-        $targets = Import-Csv -Path $ConfigPath
+        # UTF-8でCSVを読み込む
+        $targets = Import-Csv -Path $ConfigPath -Encoding UTF8
         return $targets
     } catch {
-        Write-Log "設定ファイルの読み込みに失敗しました: $($_.Exception.Message)" -Type "ERROR"
-        exit 1
+        # エンコーディングが原因でエラーが発生した場合、他のエンコーディングを試みる
+        try {
+            Write-Log "UTF-8エンコーディングでの読み込みに失敗。代替エンコーディングで試行します。" -Type "WARNING"
+            $targets = Import-Csv -Path $ConfigPath -Encoding Default
+            return $targets
+        } catch {
+            Write-Log "設定ファイルの読み込みに失敗しました: $($_.Exception.Message)" -Type "ERROR"
+            exit 1
+        }
     }
 }
 
-# FSxパスをS3キーに変換する関数
+# 入力パス形式をS3キーに変換する関数
 function Convert-PathToS3Key {
     param (
-        [string]$FsxPath
+        [string]$InputPath
     )
     
     # ルートフォルダを除去して、パスセパレータを置換
-    $s3Key = $FsxPath.Replace($RootFolder, "").TrimStart("\").Replace("\", "/")
-    return $s3Key
+    $s3Key = $InputPath.Replace($RootFolder, "").TrimStart("\").Replace("\", "/")
+    
+    # URLエンコードが必要な文字（日本語など）をエンコード
+    # ただし、スラッシュ(/)はエンコードしない
+    $parts = $s3Key.Split('/')
+    $encodedParts = $parts | ForEach-Object { 
+        [System.Web.HttpUtility]::UrlEncode($_, [System.Text.Encoding]::UTF8).Replace('+', '%20')
+    }
+    $encodedS3Key = $encodedParts -join '/'
+    
+    return $encodedS3Key
 }
 
-# ファイルの復元を実行する関数
-function Restore-File {
+# ファイルの復元リクエストを実行する関数
+function Request-ObjectRestore {
     param (
         [string]$FilePath
     )
     
-    # FSxパスからS3キーを取得
-    $s3Key = Convert-PathToS3Key -FsxPath $FilePath
+    # 入力パスからS3キーを取得
+    $s3Key = Convert-PathToS3Key -InputPath $FilePath
     
     Write-Log "復元リクエストを開始: $FilePath -> s3://$SourceBucket/$s3Key"
     
@@ -120,38 +137,38 @@ function Restore-File {
         $restoreResult = aws s3api restore-object --bucket $SourceBucket --key $s3Key --restore-request $restoreConfig 2>&1
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Log "復元リクエスト成功: $FilePath" -Type "SUCCESS"
+            Write-Log "復元リクエスト成功: s3://$SourceBucket/$s3Key" -Type "SUCCESS"
             return $true
         } else {
-            if ($restoreResult -like "*RestoreAlreadyInProgress*") {
-                Write-Log "復元リクエスト既に実行中: $FilePath" -Type "WARNING"
+            if ($restoreResult -match "RestoreAlreadyInProgress") {
+                Write-Log "復元リクエスト既に実行中: s3://$SourceBucket/$s3Key" -Type "WARNING"
                 return $true
-            } elseif ($restoreResult -like "*InvalidObjectState*") {
-                Write-Log "復元リクエスト失敗 (既に復元済み、または別のストレージクラス): $FilePath" -Type "WARNING"
+            } elseif ($restoreResult -match "InvalidObjectState") {
+                Write-Log "復元リクエスト失敗 (既に復元済み、または別のストレージクラス): s3://$SourceBucket/$s3Key" -Type "WARNING"
                 return $false
             } else {
-                Write-Log "復元リクエスト失敗: $FilePath" -Type "ERROR"
+                Write-Log "復元リクエスト失敗: s3://$SourceBucket/$s3Key" -Type "ERROR"
                 Write-Log "エラー: $restoreResult" -Type "ERROR"
                 return $false
             }
         }
     } catch {
-        Write-Log "例外発生: $FilePath" -Type "ERROR"
+        Write-Log "例外発生: s3://$SourceBucket/$s3Key" -Type "ERROR"
         Write-Log "エラー: $($_.Exception.Message)" -Type "ERROR"
         return $false
     }
 }
 
-# フォルダ内のファイルを再帰的に処理する関数
-function Process-RestoreFolder {
+# フォルダに対応するプレフィックスのオブジェクト復元リクエストを処理する関数
+function Process-RestoreRequests {
     param (
         [string]$FolderPath
     )
     
-    Write-Log "フォルダの復元処理を開始: $FolderPath"
+    Write-Log "フォルダパスに対する復元処理を開始: $FolderPath"
     
-    # S3バケット内のプレフィックスを取得
-    $s3Prefix = Convert-PathToS3Key -FsxPath $FolderPath
+    # 入力パスからS3プレフィックスを取得
+    $s3Prefix = Convert-PathToS3Key -InputPath $FolderPath
     
     # S3バケット内のオブジェクトを一覧表示
     try {
@@ -174,11 +191,11 @@ function Process-RestoreFolder {
             if ($parts.Count -ge 4) {
                 $s3Key = [string]::Join(" ", $parts[3..$parts.Count])
                 
-                # S3キーからFSxパスを構築
-                $fsxPath = "$RootFolder\$($s3Key.Replace('/', '\'))"
+                # S3キーからログ表示用のパスを構築
+                $displayPath = "s3://$SourceBucket/$s3Key"
                 
                 # 復元リクエストを実行
-                Write-Log "オブジェクト復元処理: $s3Key -> $fsxPath"
+                Write-Log "オブジェクト復元リクエスト処理: $displayPath"
                 
                 $restoreConfig = @{
                     Days = $Days
@@ -191,19 +208,19 @@ function Process-RestoreFolder {
                     $restoreResult = aws s3api restore-object --bucket $SourceBucket --key $s3Key --restore-request $restoreConfig 2>&1
                     
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Log "復元リクエスト成功: $fsxPath" -Type "SUCCESS"
+                        Write-Log "復元リクエスト成功: $displayPath" -Type "SUCCESS"
                     } else {
                         if ($restoreResult -like "*RestoreAlreadyInProgress*") {
-                            Write-Log "復元リクエスト既に実行中: $fsxPath" -Type "WARNING"
+                            Write-Log "復元リクエスト既に実行中: $displayPath" -Type "WARNING"
                         } elseif ($restoreResult -like "*InvalidObjectState*") {
-                            Write-Log "復元リクエスト失敗 (既に復元済み、または別のストレージクラス): $fsxPath" -Type "WARNING"
+                            Write-Log "復元リクエスト失敗 (既に復元済み、または別のストレージクラス): $displayPath" -Type "WARNING"
                         } else {
-                            Write-Log "復元リクエスト失敗: $fsxPath" -Type "ERROR"
+                            Write-Log "復元リクエスト失敗: $displayPath" -Type "ERROR"
                             Write-Log "エラー: $restoreResult" -Type "ERROR"
                         }
                     }
                 } catch {
-                    Write-Log "例外発生: $fsxPath" -Type "ERROR"
+                    Write-Log "例外発生: $displayPath" -Type "ERROR"
                     Write-Log "エラー: $($_.Exception.Message)" -Type "ERROR"
                 }
             } else {
@@ -214,19 +231,22 @@ function Process-RestoreFolder {
         Write-Log "S3オブジェクト一覧の取得に失敗: $($_.Exception.Message)" -Type "ERROR"
     }
     
-    Write-Log "フォルダの復元処理が完了: $FolderPath"
+    Write-Log "フォルダパスに対する復元処理が完了: $FolderPath"
 }
 
 # メイン処理
 function Start-Restore {
+    # System.Web名前空間を読み込み（URLエンコーディング用）
+    Add-Type -AssemblyName System.Web
+    
     # 初期化
     if (-not (Test-Path -Path $LogPath)) {
-        $null = New-Item -Path $LogPath -ItemType File -Force
+        $null = New-Item -Path $LogPath -ItemType File -Force -Encoding UTF8
     }
     
-    Write-Log "復元処理を開始します。"
+    Write-Log "復元リクエスト処理を開始します。"
     Write-Log "設定ファイル: $ConfigPath"
-    Write-Log "復元元S3バケット: $SourceBucket"
+    Write-Log "対象S3バケット: $SourceBucket"
     Write-Log "ルートフォルダ: $RootFolder"
     Write-Log "復元保持期間: $Days 日"
     Write-Log "復元ティア: $Tier"
@@ -257,9 +277,9 @@ function Start-Restore {
         
         # タイプに応じて処理
         if ($type -eq "folder") {
-            Process-RestoreFolder -FolderPath $path
+            Process-RestoreRequests -FolderPath $path
         } elseif ($type -eq "file") {
-            $result = Restore-File -FilePath $path
+            $result = Request-ObjectRestore -FilePath $path
             if ($result) {
                 $totalSuccessCount++
             } else {
