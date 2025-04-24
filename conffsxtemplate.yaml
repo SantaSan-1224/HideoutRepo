@@ -1,0 +1,230 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for creating FSx for Windows file systems'
+
+Parameters:
+  FileSystemConfigFile:
+    Type: String
+    Default: 'fsx-parameters.json'
+    Description: 'JSON file containing the configurations for FSx file systems'
+
+Resources:
+  # Create Log Groups
+  LogGroupMakai:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/makai'
+      RetentionInDays: 30
+
+  LogGroupGouseiken:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/gouseiken'
+      RetentionInDays: 30
+      
+  LogGroupSoumu:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/soumu'
+      RetentionInDays: 30
+      
+  LogGroupEmkaise:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/emkaise'
+      RetentionInDays: 30
+      
+  LogGroupFfbxBungic:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/ffbx-bungic'
+      RetentionInDays: 30
+      
+  LogGroupProgise:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/progise'
+      RetentionInDays: 30
+      
+  LogGroupLsji:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/lsji'
+      RetentionInDays: 30
+      
+  LogGroupMedicalffs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/medicalffs'
+      RetentionInDays: 30
+      
+  LogGroupMekaies:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/mekaies'
+      RetentionInDays: 30
+      
+  LogGroupMekaiivd:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/mekaiivd'
+      RetentionInDays: 30
+      
+  LogGroupMekaiit:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/mekaiit'
+      RetentionInDays: 30
+      
+  LogGroupMekaimx:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/mekaimx'
+      RetentionInDays: 30
+      
+  LogGroupMekains:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/mekains'
+      RetentionInDays: 30
+      
+  LogGroupMekaisd:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/mekaisd'
+      RetentionInDays: 30
+      
+  LogGroupBioken:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/aws/fsx/windows/bioken'
+      RetentionInDays: 30
+
+  # Create FSx for Windows File Systems
+  MakaiFsxFileSystem:
+    Type: AWS::FSx::FileSystem
+    DependsOn: LogGroupMakai
+    Properties:
+      FileSystemType: 'WINDOWS'
+      StorageCapacity: !FindInMap [FileSystems, Makai, StorageCapacity]
+      StorageType: 'HDD'
+      SubnetIds: 
+        - !FindInMap [CommonConfig, Network, SubnetId]
+      SecurityGroupIds: 
+        - !FindInMap [CommonConfig, Network, SecurityGroupId]
+      WindowsConfiguration:
+        AutomaticBackupRetentionDays: !FindInMap [CommonConfig, WindowsConfig, AutomaticBackupRetentionDays]
+        WeeklyMaintenanceStartTime: !FindInMap [CommonConfig, WindowsConfig, WeeklyMaintenanceStartTime]
+        DeploymentType: !FindInMap [FileSystems, Makai, DeploymentType]
+        PreferredSubnetId: !FindInMap [CommonConfig, Network, SubnetId]
+        ThroughputCapacity: !FindInMap [FileSystems, Makai, ThroughputCapacity]
+        SelfManagedActiveDirectoryConfiguration:
+          DnsIps: !FindInMap [CommonConfig, ActiveDirectory, DnsIps]
+          DomainName: !FindInMap [CommonConfig, ActiveDirectory, DomainName]
+          FileSystemAdministratorsGroup: !FindInMap [CommonConfig, ActiveDirectory, FileSystemAdministratorsGroup]
+          OrganizationalUnitDistinguishedName: !FindInMap [CommonConfig, ActiveDirectory, OrganizationalUnitDistinguishedName]
+          UserName: !FindInMap [CommonConfig, ActiveDirectory, UserName]
+          Password: !FindInMap [CommonConfig, ActiveDirectory, Password]
+        AuditLogConfiguration:
+          FileAccessAuditLogLevel: !FindInMap [CommonConfig, AuditConfig, FileAccessAuditLogLevel]
+          FileShareAccessAuditLogLevel: !FindInMap [CommonConfig, AuditConfig, FileShareAccessAuditLogLevel]
+          AuditLogDestination: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/fsx/windows/makai'
+      Tags:
+        - Key: Name
+          Value: !FindInMap [FileSystems, Makai, TagName]
+        - Key: map-migrated
+          Value: !FindInMap [CommonConfig, Tags, MapMigrated]
+        - Key: Owner
+          Value: !FindInMap [FileSystems, Makai, TagOwner]
+        - Key: location
+          Value: !FindInMap [CommonConfig, Tags, Location]
+
+  GouseikenFsxFileSystem:
+    Type: AWS::FSx::FileSystem
+    DependsOn: LogGroupGouseiken
+    Properties:
+      FileSystemType: 'WINDOWS'
+      StorageCapacity: !FindInMap [FileSystems, Gouseiken, StorageCapacity]
+      StorageType: 'HDD'
+      SubnetIds: 
+        - !FindInMap [CommonConfig, Network, SubnetId]
+      SecurityGroupIds: 
+        - !FindInMap [CommonConfig, Network, SecurityGroupId]
+      WindowsConfiguration:
+        AutomaticBackupRetentionDays: !FindInMap [CommonConfig, WindowsConfig, AutomaticBackupRetentionDays]
+        WeeklyMaintenanceStartTime: !FindInMap [CommonConfig, WindowsConfig, WeeklyMaintenanceStartTime]
+        DeploymentType: !FindInMap [FileSystems, Gouseiken, DeploymentType]
+        PreferredSubnetId: !FindInMap [CommonConfig, Network, SubnetId]
+        ThroughputCapacity: !FindInMap [FileSystems, Gouseiken, ThroughputCapacity]
+        SelfManagedActiveDirectoryConfiguration:
+          DnsIps: !FindInMap [CommonConfig, ActiveDirectory, DnsIps]
+          DomainName: !FindInMap [CommonConfig, ActiveDirectory, DomainName]
+          FileSystemAdministratorsGroup: !FindInMap [CommonConfig, ActiveDirectory, FileSystemAdministratorsGroup]
+          OrganizationalUnitDistinguishedName: !FindInMap [CommonConfig, ActiveDirectory, OrganizationalUnitDistinguishedName]
+          UserName: !FindInMap [CommonConfig, ActiveDirectory, UserName]
+          Password: !FindInMap [CommonConfig, ActiveDirectory, Password]
+        AuditLogConfiguration:
+          FileAccessAuditLogLevel: !FindInMap [CommonConfig, AuditConfig, FileAccessAuditLogLevel]
+          FileShareAccessAuditLogLevel: !FindInMap [CommonConfig, AuditConfig, FileShareAccessAuditLogLevel]
+          AuditLogDestination: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/fsx/windows/gouseiken'
+      Tags:
+        - Key: Name
+          Value: !FindInMap [FileSystems, Gouseiken, TagName]
+        - Key: map-migrated
+          Value: !FindInMap [CommonConfig, Tags, MapMigrated]
+        - Key: Owner
+          Value: !FindInMap [FileSystems, Gouseiken, TagOwner]
+        - Key: location
+          Value: !FindInMap [CommonConfig, Tags, Location]
+
+  # More file systems would follow the same pattern...
+  # I've included two examples above - you would need to duplicate this pattern for each file system
+
+Mappings:
+  CommonConfig:
+    Network:
+      SubnetId: "subnet-0f39c1c54021caf07"
+      SecurityGroupId: "sg-09c45f73d327e4ef5"
+    ActiveDirectory:
+      DnsIps: 
+        - "133.170.249.210"
+        - "133.170.249.212"
+      DomainName: "ffwin.fujifilm.co.jp"
+      FileSystemAdministratorsGroup: "dgi-100-FFRD-FsxServiceGroup"
+      OrganizationalUnitDistinguishedName: "OU=AmazonFSX-Servers,OU=FF-Servers,DC=ffwin,DC=fujifilm,DC=co,DC=jp"
+      UserName: "FF-RD-FsxService"
+      Password: "A7?\\SPO=-Hh|\\F7M"
+    WindowsConfig:
+      AutomaticBackupRetentionDays: 0
+      WeeklyMaintenanceStartTime: "6:15:30"
+    AuditConfig:
+      FileAccessAuditLogLevel: "SUCCESS_AND_FAILURE"
+      FileShareAccessAuditLogLevel: "SUCCESS_AND_FAILURE"
+    Tags:
+      MapMigrated: "migDFLDFG29A3"
+      Location: "kai"
+  
+  FileSystems:
+    Makai:
+      StorageCapacity: 16384
+      DeploymentType: "MULTI_AZ_1"
+      ThroughputCapacity: 32
+      TagName: "fsx-RDFS-pr-makai-001"
+      TagOwner: "A85AM00"
+    Gouseiken:
+      StorageCapacity: 3072
+      DeploymentType: "MULTI_AZ_1"
+      ThroughputCapacity: 32
+      TagName: "fsx-RDFS-pr-gouseiken-001"
+      TagOwner: "A85GG00"
+    # Add more file systems following the same pattern
+
+Outputs:
+  MakaiFileSystemId:
+    Description: "File System ID for Makai"
+    Value: !Ref MakaiFsxFileSystem
+    
+  GouseikenFileSystemId:
+    Description: "File System ID for Gouseiken"
+    Value: !Ref GouseikenFsxFileSystem
+    
+  # More outputs would follow for each file system
