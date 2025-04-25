@@ -1,0 +1,159 @@
+{
+  "CommonConfig": {
+    "Network": {
+      "SubnetId": "subnet-0f39c1c54021caf07",
+      "SecurityGroupId": "sg-09c45f73d327e4ef5"
+    },
+    "ActiveDirectory": {
+      "DnsIps": [
+        "133.170.249.210",
+        "133.170.249.212"
+      ],
+      "DomainName": "ffwin.fujifilm.co.jp",
+      "FileSystemAdministratorsGroup": "dgi-100-FFRD-FsxServiceGroup",
+      "OrganizationalUnitDistinguishedName": "OU=AmazonFSX-Servers,OU=FF-Servers,DC=ffwin,DC=fujifilm,DC=co,DC=jp",
+      "UserName": "FF-RD-FsxService",
+      "Password": "A7?\\SPO=-Hh|\\F7M"
+    },
+    "WindowsConfig": {
+      "AutomaticBackupRetentionDays": 0,
+      "WeeklyMaintenanceStartTime": "6:15:30"
+    },
+    "AuditConfig": {
+      "FileAccessAuditLogLevel": "SUCCESS_AND_FAILURE",
+      "FileShareAccessAuditLogLevel": "SUCCESS_AND_FAILURE"
+    },
+    "Tags": {
+      "MapMigrated": "migDFLDFG29A3",
+      "Location": "kai"
+    }
+  },
+  "FileSystems": {
+    "Makai": {
+      "StorageCapacity": 16384,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-makai-001",
+      "TagOwner": "A85AM00"
+    },
+    "Gouseiken": {
+      "StorageCapacity": 3072,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-gouseiken-001",
+      "TagOwner": "A85GG00"
+    },
+    "Soumu": {
+      "StorageCapacity": 2048,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-soumu-001",
+      "TagOwner": "A85CH02"
+    },
+    "Emkaise": {
+      "StorageCapacity": 4096,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-emkaise-001",
+      "TagOwner": "A837730"
+    },
+    "FfbxBungic": {
+      "StorageCapacity": 2048,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-ffbx_bungic-001",
+      "TagOwner": "AWA0MA01"
+    },
+    "Progise": {
+      "StorageCapacity": 2048,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 64,
+      "TagName": "fsx-RDFS-pr-progise-001",
+      "TagOwner": "A85SR20"
+    },
+    "Lsji": {
+      "StorageCapacity": 6144,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 64,
+      "TagName": "fsx-RDFS-pr-lsji-001",
+      "TagOwner": "A003X5A"
+    },
+    "Medicalffs": {
+      "StorageCapacity": 8192,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 64,
+      "TagName": "fsx-RDFS-pr-medicalffs-001",
+      "TagOwner": "A85MH10"
+    },
+    "Mekaies": {
+      "StorageCapacity": 65536,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-mekaies-001",
+      "TagOwner": "A85ES00"
+    },
+    "Mekaiivd": {
+      "StorageCapacity": 6144,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-mekaiivd-001",
+      "TagOwner": "A85SD30"
+    },
+    "Mekaiit": {
+      "StorageCapacity": 2048,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 64,
+      "TagName": "fsx-RDFS-pr-mekaiit-001",
+      "TagOwner": "A85DB00"
+    },
+    "Mekaimx": {
+      "StorageCapacity": 16384,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-mekaimx-001",
+      "TagOwner": "A85E410"
+    },
+    "Mekains": {
+      "StorageCapacity": 56320,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-mekains-001",
+      "TagOwner": "A85D100"
+    },
+    "Mekaisd": {
+      "StorageCapacity": 4096,
+      "DeploymentType": "MULTI_AZ_1",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-mekaisd-001",
+      "TagOwner": "A85D100"
+    },
+    "Bioken001": {
+      "StorageCapacity": 5120,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-bioken-001",
+      "TagOwner": "A85LM00"
+    },
+    "Bioken002": {
+      "StorageCapacity": 5120,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-bioken-002",
+      "TagOwner": "A85LM00"
+    },
+    "Bioken003": {
+      "StorageCapacity": 5120,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-bioken-003",
+      "TagOwner": "A85LM00"
+    },
+    "Bioken004": {
+      "StorageCapacity": 5120,
+      "DeploymentType": "SINGLE_AZ_2",
+      "ThroughputCapacity": 32,
+      "TagName": "fsx-RDFS-pr-bioken-004",
+      "TagOwner": "A85LM00"
+    }
+  }
+}
