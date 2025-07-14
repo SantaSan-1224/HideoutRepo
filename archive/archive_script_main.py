@@ -34,21 +34,54 @@ class ArchiveProcessor:
         
     def load_config(self, config_path: str) -> Dict:
         """設定ファイルを読み込み"""
+        # デフォルト設定
+        default_config = {
+            "logging": {
+                "log_directory": "logs",
+                "log_level": "INFO"
+            },
+            "file_server": {
+                "exclude_extensions": [".tmp", ".lock", ".bak"],
+                "archived_suffix": "_archived.txt"
+            },
+            "processing": {
+                "max_file_size": 10737418240,
+                "chunk_size": 8388608,
+                "retry_count": 3
+            }
+        }
+        
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
+                
+            # デフォルト設定とマージ
+            for key, value in default_config.items():
+                if key not in config:
+                    config[key] = value
+                elif isinstance(value, dict):
+                    for sub_key, sub_value in value.items():
+                        if sub_key not in config[key]:
+                            config[key][sub_key] = sub_value
+                            
             return config
         except FileNotFoundError:
-            print(f"設定ファイルが見つかりません: {config_path}")
-            sys.exit(1)
+            print(f"設定ファイルが見つかりません。デフォルト設定を使用します: {config_path}")
+            return default_config
         except json.JSONDecodeError as e:
-            print(f"設定ファイルの形式が正しくありません: {e}")
-            sys.exit(1)
+            print(f"設定ファイルの形式が正しくありません。デフォルト設定を使用します: {e}")
+            return default_config
+        except Exception as e:
+            print(f"設定ファイル読み込みエラー。デフォルト設定を使用します: {e}")
+            return default_config
             
     def setup_logger(self) -> logging.Logger:
         """ログ設定の初期化"""
         logger = logging.getLogger('archive_processor')
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.DEBUG)  # デバッグレベルに変更
+        
+        # 既存のハンドラーをクリア
+        logger.handlers.clear()
         
         # ログフォーマット
         formatter = logging.Formatter(
@@ -62,14 +95,20 @@ class ArchiveProcessor:
         logger.addHandler(console_handler)
         
         # ファイル出力
-        log_dir = Path(self.config.get('logging', {}).get('log_directory', 'logs'))
-        log_dir.mkdir(exist_ok=True)
-        
-        log_file = log_dir / f"archive_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        try:
+            log_config = self.config.get('logging', {})
+            log_dir = Path(log_config.get('log_directory', 'logs'))
+            log_dir.mkdir(exist_ok=True)
+            
+            log_file = log_dir / f"archive_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            
+            logger.info(f"ログファイル: {log_file}")
+        except Exception as e:
+            logger.warning(f"ログファイル設定エラー: {e}")
         
         return logger
         
@@ -194,39 +233,34 @@ class ArchiveProcessor:
         """ディレクトリパスのカラムを特定"""
         # よくある列名のパターン
         path_patterns = [
+            'directory path', 'directory_path', 'dir_path',
             'path', 'directory', 'folder', 'dir',
             'パス', 'ディレクトリ', 'フォルダ',
             'target', 'source', 'location'
         ]
         
+        self.logger.info(f"ヘッダー検索対象: {headers}")
+        
         for i, header in enumerate(headers):
-            header_lower = header.lower()
+            header_lower = header.lower().strip()
+            self.logger.debug(f"ヘッダー {i}: '{header}' -> '{header_lower}'")
+            
             for pattern in path_patterns:
                 if pattern in header_lower:
+                    self.logger.info(f"パスカラムを発見: インデックス {i}, ヘッダー '{header}', パターン '{pattern}'")
                     return i
         
         # パターンが見つからない場合は最初のカラムを使用
+        self.logger.warning("パスカラムが特定できませんでした。最初のカラムを使用します。")
         return 0
     
     def _normalize_path(self, path: str) -> str:
-        """パスの正規化"""
+        """パスの正規化（簡素化版）"""
         # 前後の空白を削除
         path = path.strip()
+        self.logger.info(f"正規化前: '{path}' -> 正規化後: '{path}'")
         
-        # バックスラッシュを統一
-        path = path.replace('/', '\\')
-        
-        # 末尾のバックスラッシュを削除
-        path = path.rstrip('\\')
-        
-        # UNCパスの場合、先頭の\\を確保
-        if path.startswith('\\\\'):
-            return path
-        
-        # 相対パスの場合は絶対パスに変換の警告
-        if not (path.startswith('\\\\') or (len(path) > 1 and path[1] == ':')):
-            self.logger.warning(f"相対パスは推奨されません: {path}")
-        
+        # 基本的にはそのまま返す（デバッグスクリプトで動作していたため）
         return path
     
     def _validate_directory_path(self, path: str) -> bool:
@@ -237,62 +271,46 @@ class ArchiveProcessor:
                 self.logger.error(f"空のパスです: '{path}'")
                 return False
             
-            # 基本的なパス形式チェック
-            self.logger.debug(f"パス検証開始: '{path}'")
+            self.logger.info(f"パス検証開始: '{path}'")
             
-            # 不正な文字チェック（UNCパス考慮）
-            invalid_chars = ['<', '>', '"', '|', '?', '*']
-            # UNCパスの場合、先頭の\\とドライブ文字の:は除外
-            check_path = path[2:] if path.startswith('\\\\') else path
+            # ディレクトリの存在チェック（シンプル版）
+            self.logger.info(f"存在チェック実行中...")
+            exists = os.path.exists(path)
+            self.logger.info(f"os.path.exists() 結果: {exists}")
             
-            # ドライブ文字のコロンは除外
-            if len(check_path) > 1 and check_path[1] == ':':
-                check_path = check_path[0] + check_path[2:]
-            
-            for char in invalid_chars:
-                if char in check_path:
-                    self.logger.error(f"不正な文字が含まれています: '{char}' in '{path}'")
-                    return False
-            
-            # パスの長さチェック（Windowsの制限を緩和）
-            if len(path) > 32767:  # Windowsの内部制限
-                self.logger.error(f"パスが長すぎます: {len(path)} > 32767")
+            if not exists:
+                self.logger.error(f"ディレクトリが存在しません: {path}")
                 return False
             
-            # ディレクトリの存在チェック
-            try:
-                exists = os.path.exists(path)
-                if not exists:
-                    self.logger.error(f"ディレクトリが存在しません: {path}")
-                    return False
-                
-                # ディレクトリかどうかの確認
-                is_dir = os.path.isdir(path)
-                if not is_dir:
-                    self.logger.error(f"ディレクトリではありません: {path}")
-                    return False
-                
-                # アクセス権限チェック
-                can_read = os.access(path, os.R_OK)
-                if not can_read:
-                    self.logger.error(f"ディレクトリへの読み取り権限がありません: {path}")
-                    return False
-                
-            except PermissionError as e:
-                self.logger.error(f"ディレクトリへのアクセス権限がありません: {path} - {str(e)}")
-                return False
-            except OSError as e:
-                self.logger.error(f"ディレクトリアクセスエラー: {path} - {str(e)}")
-                return False
-            except Exception as e:
-                self.logger.error(f"ディレクトリ検証中に予期しないエラー: {path} - {str(e)}")
+            # ディレクトリかどうかの確認
+            self.logger.info(f"ディレクトリチェック実行中...")
+            is_dir = os.path.isdir(path)
+            self.logger.info(f"os.path.isdir() 結果: {is_dir}")
+            
+            if not is_dir:
+                self.logger.error(f"ディレクトリではありません: {path}")
                 return False
             
-            self.logger.debug(f"パス検証成功: {path}")
+            # アクセス権限チェック
+            self.logger.info(f"権限チェック実行中...")
+            can_read = os.access(path, os.R_OK)
+            self.logger.info(f"os.access() 結果: {can_read}")
+            
+            if not can_read:
+                self.logger.error(f"ディレクトリへの読み取り権限がありません: {path}")
+                return False
+            
+            self.logger.info(f"パス検証成功: {path}")
             return True
             
+        except PermissionError as e:
+            self.logger.error(f"権限エラー: {path} - {str(e)}")
+            return False
+        except OSError as e:
+            self.logger.error(f"OSエラー: {path} - {str(e)}")
+            return False
         except Exception as e:
-            self.logger.error(f"ディレクトリパス検証中にエラー: {path} - {str(e)}")
+            self.logger.error(f"予期しないエラー: {path} - {str(e)}", exc_info=True)
             return False
         
     def collect_files(self, directories: List[str]) -> List[Dict]:
