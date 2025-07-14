@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-確実に動作するアーカイブスクリプト（最終版）
+確実に動作するアーカイブスクリプト（エラー記録対応版）
 """
 
 import os
@@ -12,6 +12,7 @@ import argparse
 import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import csv
 
 # 設定ファイルのデフォルトパス
 DEFAULT_CONFIG_PATH = "config/archive_config.json"
@@ -22,6 +23,7 @@ class ArchiveProcessor:
     def __init__(self, config_path: str = DEFAULT_CONFIG_PATH):
         self.config = self.load_config(config_path)
         self.logger = self.setup_logger()
+        self.csv_errors = []  # CSV検証エラーを記録
         self.stats = {
             'total_files': 0,
             'processed_files': 0,
@@ -112,10 +114,11 @@ class ArchiveProcessor:
         return logger
         
     def validate_csv_input(self, csv_path: str) -> List[str]:
-        """CSVファイルの読み込み・検証処理（確実版）"""
+        """CSVファイルの読み込み・検証処理（エラー記録対応版）"""
         self.logger.info(f"CSVファイルの読み込み開始: {csv_path}")
         
         directories = []
+        self.csv_errors = []  # エラーリストをリセット
         
         try:
             # シンプルに行単位で読み込み（確実に動作することが確認済み）
@@ -145,49 +148,80 @@ class ArchiveProcessor:
                 
                 # 最低限の長さチェック
                 if len(path) < 3:
+                    error_item = {
+                        'line_number': line_num,
+                        'path': path,
+                        'error_reason': 'パスが短すぎます',
+                        'original_line': line.rstrip()
+                    }
+                    self.csv_errors.append(error_item)
                     self.logger.warning(f"行 {line_num}: パスが短すぎます")
                     continue
                 
                 # パスの妥当性チェック
-                if self._validate_directory_path(path):
+                validation_result = self._validate_directory_path_detailed(path)
+                if validation_result['valid']:
                     directories.append(path)
                     self.logger.info(f"行 {line_num}: 有効なパス追加 ✓")
                 else:
-                    self.logger.error(f"行 {line_num}: 無効なパス ✗")
+                    # エラー項目として記録
+                    error_item = {
+                        'line_number': line_num,
+                        'path': path,
+                        'error_reason': validation_result['error_reason'],
+                        'original_line': line.rstrip()
+                    }
+                    self.csv_errors.append(error_item)
+                    self.logger.error(f"行 {line_num}: {validation_result['error_reason']} ✗")
             
         except Exception as e:
             self.logger.error(f"CSV読み込みエラー: {str(e)}")
             return []
         
-        self.logger.info(f"CSV読み込み完了 - 有効ディレクトリ数: {len(directories)}")
+        self.logger.info(f"CSV読み込み完了")
+        self.logger.info(f"  - 有効ディレクトリ数: {len(directories)}")
+        self.logger.info(f"  - エラー項目数: {len(self.csv_errors)}")
+        
         return directories
     
-    def _validate_directory_path(self, path: str) -> bool:
-        """ディレクトリパスの妥当性チェック"""
+    def _validate_directory_path_detailed(self, path: str) -> Dict:
+        """ディレクトリパスの詳細検証"""
         try:
             if not path or path.strip() == '':
-                return False
+                return {'valid': False, 'error_reason': '空のパス'}
+            
+            # 不正な文字チェック
+            invalid_chars = ['<', '>', ':', '"', '|', '?', '*']
+            check_path = path[2:] if path.startswith('\\\\') else path
+            for char in invalid_chars:
+                if char in check_path:
+                    return {'valid': False, 'error_reason': f'不正な文字が含まれています: {char}'}
+            
+            # パスの長さチェック
+            if len(path) > 260:
+                return {'valid': False, 'error_reason': f'パスが長すぎます: {len(path)} > 260'}
             
             # 存在チェック
             if not os.path.exists(path):
-                self.logger.error(f"ディレクトリが存在しません")
-                return False
+                return {'valid': False, 'error_reason': 'ディレクトリが存在しません'}
             
             # ディレクトリチェック
             if not os.path.isdir(path):
-                self.logger.error(f"ディレクトリではありません")
-                return False
+                return {'valid': False, 'error_reason': 'ディレクトリではありません（ファイルです）'}
             
             # 権限チェック
             if not os.access(path, os.R_OK):
-                self.logger.error(f"読み取り権限がありません")
-                return False
+                return {'valid': False, 'error_reason': '読み取り権限がありません'}
             
-            return True
+            return {'valid': True, 'error_reason': None}
             
         except Exception as e:
-            self.logger.error(f"パス検証エラー: {str(e)}")
-            return False
+            return {'valid': False, 'error_reason': f'パス検証エラー: {str(e)}'}
+    
+    def _validate_directory_path(self, path: str) -> bool:
+        """ディレクトリパスの妥当性チェック（旧版互換）"""
+        result = self._validate_directory_path_detailed(path)
+        return result['valid']
         
     def collect_files(self, directories: List[str]) -> List[Dict]:
         """ファイル列挙・収集処理"""
@@ -272,8 +306,42 @@ class ArchiveProcessor:
         # TODO: 実装
         self.logger.info("データベース登録完了")
         
-    def generate_error_csv(self, failed_items: List[Dict], original_csv_path: str) -> str:
-        """エラーCSV生成"""
+    def generate_csv_error_file(self, original_csv_path: str) -> Optional[str]:
+        """CSV検証エラー用のエラーファイル生成"""
+        if not self.csv_errors:
+            return None
+            
+        self.logger.info("CSV検証エラーファイル生成開始")
+        
+        try:
+            # エラーCSVのパス生成（元CSVと同じ場所）
+            original_path = Path(original_csv_path)
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            error_csv_path = original_path.parent / f"{original_path.stem}_csv_errors_{timestamp}.csv"
+            
+            # エラーCSVの生成
+            with open(error_csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = ['行番号', 'パス', 'エラー理由', '元の行']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                writer.writeheader()
+                for item in self.csv_errors:
+                    writer.writerow({
+                        '行番号': item['line_number'],
+                        'パス': item['path'],
+                        'エラー理由': item['error_reason'],
+                        '元の行': item['original_line']
+                    })
+            
+            self.logger.info(f"CSV検証エラーファイル生成完了: {error_csv_path}")
+            return str(error_csv_path)
+            
+        except Exception as e:
+            self.logger.error(f"CSV検証エラーファイル生成失敗: {str(e)}")
+            return None
+        
+    def generate_error_csv(self, failed_items: List[Dict], original_csv_path: str) -> Optional[str]:
+        """アーカイブ処理エラー用のエラーCSV生成"""
         if not failed_items:
             return None
         # TODO: 実装
@@ -285,6 +353,7 @@ class ArchiveProcessor:
         
         self.logger.info("=== 処理統計 ===")
         self.logger.info(f"処理時間: {elapsed_time}")
+        self.logger.info(f"CSV検証エラー数: {len(self.csv_errors)}")
         self.logger.info(f"総ファイル数: {self.stats['total_files']}")
         self.logger.info(f"成功ファイル数: {self.stats['processed_files']}")
         self.logger.info(f"失敗ファイル数: {self.stats['failed_files']}")
@@ -299,6 +368,12 @@ class ArchiveProcessor:
             
             # 1. CSVファイル読み込み・検証
             directories = self.validate_csv_input(csv_path)
+            
+            # CSV検証エラーがあった場合はエラーファイルを生成
+            if self.csv_errors:
+                error_csv_path = self.generate_csv_error_file(csv_path)
+                self.logger.warning(f"CSV検証エラーが発生しました: {error_csv_path}")
+            
             if not directories:
                 self.logger.error("処理対象のディレクトリが見つかりません")
                 return 1
@@ -321,11 +396,11 @@ class ArchiveProcessor:
             # 5. データベース登録
             self.save_to_database(processed_results)
             
-            # 6. エラー処理
+            # 6. アーカイブ処理エラー処理
             failed_items = [r for r in processed_results if not r.get('success', False)]
             if failed_items:
                 error_csv_path = self.generate_error_csv(failed_items, csv_path)
-                self.logger.warning(f"エラーが発生したファイルがあります: {error_csv_path}")
+                self.logger.warning(f"アーカイブエラーが発生したファイルがあります: {error_csv_path}")
                 
             self.stats['processed_files'] = len([r for r in processed_results if r.get('success', False)])
             self.stats['failed_files'] = len(failed_items)
