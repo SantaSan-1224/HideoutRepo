@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-アーカイブスクリプト メイン処理（修正版）
+アーカイブスクリプト メイン処理（完全修正版）
 企業内ファイルサーバからAWS S3 Glacier Deep Archiveへのアーカイブ処理
 """
 
@@ -11,6 +11,7 @@ import json
 import logging
 import argparse
 import datetime
+import csv
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -113,7 +114,7 @@ class ArchiveProcessor:
         return logger
         
     def validate_csv_input(self, csv_path: str) -> List[str]:
-        """CSVファイルの読み込み・検証処理（修正版）"""
+        """CSVファイルの読み込み・検証処理（詳細デバッグ版）"""
         self.logger.info(f"CSVファイルの読み込み開始: {csv_path}")
         
         directories = []
@@ -125,23 +126,34 @@ class ArchiveProcessor:
         
         for encoding in encodings:
             try:
-                import csv
-                
                 self.logger.info(f"エンコーディング '{encoding}' で読み込み試行中...")
                 
-                with open(csv_path, 'r', encoding=encoding) as csvfile:
+                with open(csv_path, 'r', encoding=encoding, newline='') as csvfile:
+                    # ファイル全体を一度読み込んでデバッグ
+                    content = csvfile.read()
+                    self.logger.debug(f"ファイル全体内容: {repr(content[:200])}...")  # 最初の200文字
+                    self.logger.debug(f"ファイル全体サイズ: {len(content)} 文字")
+                    
+                    # ファイルポインタを先頭に戻す
+                    csvfile.seek(0)
+                    
                     # CSVファイルの方言を自動検出
                     sample = csvfile.read(1024)
                     csvfile.seek(0)
-                    sniffer = csv.Sniffer()
                     
+                    self.logger.debug(f"CSVサンプル: {repr(sample)}")
+                    
+                    sniffer = csv.Sniffer()
                     try:
-                        delimiter = sniffer.sniff(sample).delimiter
-                        self.logger.info(f"検出されたデリミタ: '{delimiter}'")
+                        dialect = sniffer.sniff(sample)
+                        delimiter = dialect.delimiter
+                        self.logger.info(f"検出されたデリミタ: {repr(delimiter)}")
                     except:
                         delimiter = ','
                         self.logger.info(f"デリミタ検出失敗、カンマを使用")
                     
+                    # CSVリーダーの作成（フィールドサイズ制限を拡大）
+                    csv.field_size_limit(sys.maxsize)  # フィールドサイズ制限を最大に
                     reader = csv.reader(csvfile, delimiter=delimiter)
                     
                     # ヘッダー行の処理
@@ -169,18 +181,41 @@ class ArchiveProcessor:
                     for row in reader:
                         row_number += 1
                         
+                        # デバッグ: 行全体を出力
+                        self.logger.debug(f"行 {row_number}: 行全体 = {repr(row)}")
+                        self.logger.debug(f"行 {row_number}: 行要素数 = {len(row)}")
+                        
                         if not row or len(row) <= path_column_index:
                             self.logger.warning(f"行 {row_number}: 空行またはデータ不足をスキップ")
                             continue
                         
-                        # ディレクトリパスの取得と正規化
-                        raw_path = row[path_column_index].strip()
-                        if not raw_path:
+                        # ディレクトリパスの取得
+                        raw_path = row[path_column_index]
+                        self.logger.info(f"行 {row_number}: 生データ = {repr(raw_path)}")
+                        self.logger.info(f"行 {row_number}: 生データ長 = {len(raw_path)} 文字")
+                        
+                        # 全要素をデバッグ出力
+                        for i, cell in enumerate(row):
+                            self.logger.debug(f"行 {row_number}: セル[{i}] = {repr(cell)} (長さ: {len(cell)})")
+                        
+                        if not raw_path or not raw_path.strip():
                             self.logger.warning(f"行 {row_number}: 空のパスをスキップ")
+                            continue
+                        
+                        # ヘッダー行の値をスキップ（"Directory Path"など）
+                        if headers and raw_path.strip().lower() in [h.lower() for h in headers]:
+                            self.logger.info(f"行 {row_number}: ヘッダー値をスキップ - {repr(raw_path)}")
                             continue
                         
                         # パスの正規化
                         normalized_path = self._normalize_path(raw_path)
+                        
+                        if not normalized_path:
+                            self.logger.error(f"行 {row_number}: パス正規化に失敗 - {repr(raw_path)}")
+                            invalid_paths.append(raw_path)
+                            continue
+                        
+                        self.logger.info(f"行 {row_number}: 正規化済み = {repr(normalized_path)}")
                         
                         # 重複チェック
                         if normalized_path in seen_paths:
@@ -227,6 +262,58 @@ class ArchiveProcessor:
         if duplicate_paths:
             self.logger.warning(f"重複パス: {duplicate_paths}")
             
+        return directories
+
+    def validate_csv_input_alternative(self, csv_path: str) -> List[str]:
+        """CSVファイルの読み込み・検証処理（代替実装）"""
+        self.logger.info(f"代替CSVファイル読み込み開始: {csv_path}")
+        
+        directories = []
+        
+        try:
+            # ファイルを行単位で直接読み込み
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                lines = f.readlines()
+            
+            self.logger.info(f"読み込み行数: {len(lines)}")
+            
+            for i, line in enumerate(lines):
+                line_num = i + 1
+                self.logger.debug(f"行 {line_num}: {repr(line)}")
+                
+                # 改行文字を除去
+                clean_line = line.strip()
+                
+                if not clean_line:
+                    self.logger.debug(f"行 {line_num}: 空行をスキップ")
+                    continue
+                
+                # ヘッダー行をスキップ
+                if i == 0 and ('path' in clean_line.lower() or 'directory' in clean_line.lower()):
+                    self.logger.info(f"行 {line_num}: ヘッダー行をスキップ - {repr(clean_line)}")
+                    continue
+                
+                # CSVの場合はカンマで分割（簡易版）
+                if ',' in clean_line:
+                    parts = [part.strip().strip('"') for part in clean_line.split(',')]
+                    path = parts[0] if parts else ""
+                else:
+                    path = clean_line
+                
+                self.logger.info(f"行 {line_num}: 抽出パス = {repr(path)} (長さ: {len(path)})")
+                
+                if path and len(path) > 5:  # 最低限の長さチェック
+                    if self._validate_directory_path(path):
+                        directories.append(path)
+                        self.logger.info(f"行 {line_num}: 有効なパス追加 - {path}")
+                    else:
+                        self.logger.error(f"行 {line_num}: 無効なパス - {path}")
+            
+        except Exception as e:
+            self.logger.error(f"代替CSV読み込みエラー: {str(e)}")
+            return []
+        
+        self.logger.info(f"代替CSV読み込み完了 - 有効ディレクトリ数: {len(directories)}")
         return directories
     
     def _find_path_column(self, headers: List[str]) -> int:
@@ -371,11 +458,6 @@ class ArchiveProcessor:
         self.logger.info("S3アップロード開始")
         
         # TODO: S3アップロード処理の実装
-        # - boto3を使用したS3アップロード
-        # - Glacier Deep Archive指定
-        # - VPCエンドポイント経由でのアップロード
-        # - 進捗管理
-        
         results = []
         for file_info in files:
             # 仮の処理結果
@@ -395,10 +477,6 @@ class ArchiveProcessor:
         self.logger.info("アーカイブ後処理開始")
         
         # TODO: アーカイブ後処理の実装
-        # - 元ファイルの削除
-        # - _archived.txtファイルの作成
-        # - 処理結果の記録
-        
         processed_results = results  # 仮の戻り値
         self.logger.info("アーカイブ後処理完了")
         return processed_results
@@ -408,10 +486,6 @@ class ArchiveProcessor:
         self.logger.info("データベース登録開始")
         
         # TODO: データベース登録処理の実装
-        # - PostgreSQLへの接続
-        # - archive_historyテーブルへの登録
-        # - トランザクション管理
-        
         self.logger.info("データベース登録完了")
         
     def generate_error_csv(self, failed_items: List[Dict], original_csv_path: str) -> str:
@@ -422,10 +496,6 @@ class ArchiveProcessor:
         self.logger.info("エラーCSVファイル生成開始")
         
         # TODO: エラーCSV生成処理の実装
-        # - 元CSVと同じ場所にエラーCSVを出力
-        # - 再試行を考慮した命名規則
-        # - エラー理由の記録
-        
         error_csv_path = "error_output.csv"  # 仮のパス
         self.logger.info(f"エラーCSVファイル生成完了: {error_csv_path}")
         return error_csv_path
@@ -502,6 +572,7 @@ def main():
     parser.add_argument('--config', default=DEFAULT_CONFIG_PATH, 
                        help=f'設定ファイルのパス (デフォルト: {DEFAULT_CONFIG_PATH})')
     parser.add_argument('--debug', action='store_true', help='デバッグモードで実行')
+    parser.add_argument('--alternative', action='store_true', help='代替CSV読み込み方法を使用')
     
     args = parser.parse_args()
     
@@ -516,6 +587,13 @@ def main():
         
     # アーカイブ処理の実行
     processor = ArchiveProcessor(args.config)
+    
+    # 代替方法を使用する場合
+    if args.alternative:
+        # validate_csv_input メソッドを一時的に置き換え
+        processor.validate_csv_input = processor.validate_csv_input_alternative
+        print("代替CSV読み込み方法を使用します")
+    
     exit_code = processor.run(args.csv_path, args.request_id)
     
     sys.exit(exit_code)
