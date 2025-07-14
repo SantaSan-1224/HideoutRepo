@@ -77,14 +77,175 @@ class ArchiveProcessor:
         """CSVファイルの読み込み・検証処理"""
         self.logger.info(f"CSVファイルの読み込み開始: {csv_path}")
         
-        # TODO: A. CSVファイル読み込み・検証処理の実装
-        # - CSV形式の検証
-        # - ディレクトリパスの妥当性チェック
-        # - 重複チェック
+        directories = []
+        invalid_paths = []
+        duplicate_paths = []
         
-        directories = []  # 仮の戻り値
-        self.logger.info(f"対象ディレクトリ数: {len(directories)}")
+        try:
+            import csv
+            
+            with open(csv_path, 'r', encoding='utf-8-sig') as csvfile:
+                # CSVファイルの方言を自動検出
+                sample = csvfile.read(1024)
+                csvfile.seek(0)
+                sniffer = csv.Sniffer()
+                delimiter = sniffer.sniff(sample).delimiter
+                
+                reader = csv.reader(csvfile, delimiter=delimiter)
+                
+                # ヘッダー行の処理
+                headers = next(reader, None)
+                if headers:
+                    # ヘッダーの正規化（空白除去）
+                    headers = [h.strip() for h in headers]
+                    self.logger.info(f"CSVヘッダー: {headers}")
+                    
+                    # ディレクトリパスのカラム位置を特定
+                    path_column_index = self._find_path_column(headers)
+                    if path_column_index == -1:
+                        self.logger.error("ディレクトリパスのカラムが見つかりません")
+                        return []
+                else:
+                    # ヘッダーなしの場合、最初のカラムをパスとして扱う
+                    path_column_index = 0
+                    csvfile.seek(0)
+                    reader = csv.reader(csvfile, delimiter=delimiter)
+                
+                # データ行の処理
+                seen_paths = set()
+                row_number = 1 if headers else 0
+                
+                for row in reader:
+                    row_number += 1
+                    
+                    if not row or len(row) <= path_column_index:
+                        self.logger.warning(f"行 {row_number}: 空行またはデータ不足をスキップ")
+                        continue
+                    
+                    # ディレクトリパスの取得と正規化
+                    raw_path = row[path_column_index].strip()
+                    if not raw_path:
+                        self.logger.warning(f"行 {row_number}: 空のパスをスキップ")
+                        continue
+                    
+                    # パスの正規化
+                    normalized_path = self._normalize_path(raw_path)
+                    
+                    # 重複チェック
+                    if normalized_path in seen_paths:
+                        duplicate_paths.append(normalized_path)
+                        self.logger.warning(f"行 {row_number}: 重複パス検出 - {normalized_path}")
+                        continue
+                    
+                    seen_paths.add(normalized_path)
+                    
+                    # パスの妥当性チェック
+                    if self._validate_directory_path(normalized_path):
+                        directories.append(normalized_path)
+                        self.logger.info(f"行 {row_number}: 有効なパス - {normalized_path}")
+                    else:
+                        invalid_paths.append(normalized_path)
+                        self.logger.error(f"行 {row_number}: 無効なパス - {normalized_path}")
+                        
+        except FileNotFoundError:
+            self.logger.error(f"CSVファイルが見つかりません: {csv_path}")
+            return []
+        except Exception as e:
+            self.logger.error(f"CSVファイル読み込みエラー: {str(e)}")
+            return []
+        
+        # 結果サマリー
+        self.logger.info(f"CSVファイル読み込み完了")
+        self.logger.info(f"  - 有効なディレクトリ数: {len(directories)}")
+        self.logger.info(f"  - 無効なパス数: {len(invalid_paths)}")
+        self.logger.info(f"  - 重複パス数: {len(duplicate_paths)}")
+        
+        if invalid_paths:
+            self.logger.warning(f"無効なパス: {invalid_paths}")
+        if duplicate_paths:
+            self.logger.warning(f"重複パス: {duplicate_paths}")
+            
         return directories
+    
+    def _find_path_column(self, headers: List[str]) -> int:
+        """ディレクトリパスのカラムを特定"""
+        # よくある列名のパターン
+        path_patterns = [
+            'path', 'directory', 'folder', 'dir',
+            'パス', 'ディレクトリ', 'フォルダ',
+            'target', 'source', 'location'
+        ]
+        
+        for i, header in enumerate(headers):
+            header_lower = header.lower()
+            for pattern in path_patterns:
+                if pattern in header_lower:
+                    return i
+        
+        # パターンが見つからない場合は最初のカラムを使用
+        return 0
+    
+    def _normalize_path(self, path: str) -> str:
+        """パスの正規化"""
+        # 前後の空白を削除
+        path = path.strip()
+        
+        # バックスラッシュを統一
+        path = path.replace('/', '\\')
+        
+        # 末尾のバックスラッシュを削除
+        path = path.rstrip('\\')
+        
+        # UNCパスの場合、先頭の\\を確保
+        if path.startswith('\\\\'):
+            return path
+        
+        # 相対パスの場合は絶対パスに変換
+        if not (path.startswith('\\\\') or (len(path) > 1 and path[1] == ':')):
+            self.logger.warning(f"相対パスは推奨されません: {path}")
+        
+        return path
+    
+    def _validate_directory_path(self, path: str) -> bool:
+        """ディレクトリパスの妥当性チェック"""
+        try:
+            # 空文字チェック
+            if not path or path.strip() == '':
+                return False
+            
+            # 不正な文字チェック
+            invalid_chars = ['<', '>', ':', '"', '|', '?', '*']
+            # UNCパスの場合、先頭の\\は除外
+            check_path = path[2:] if path.startswith('\\\\') else path
+            for char in invalid_chars:
+                if char in check_path:
+                    self.logger.error(f"不正な文字が含まれています: {char} in {path}")
+                    return False
+            
+            # パスの長さチェック（Windowsの制限）
+            if len(path) > 260:
+                self.logger.error(f"パスが長すぎます: {len(path)} > 260")
+                return False
+            
+            # ディレクトリの存在チェック
+            if not os.path.exists(path):
+                self.logger.error(f"ディレクトリが存在しません: {path}")
+                return False
+            
+            if not os.path.isdir(path):
+                self.logger.error(f"ディレクトリではありません: {path}")
+                return False
+            
+            # アクセス権限チェック
+            if not os.access(path, os.R_OK):
+                self.logger.error(f"ディレクトリへの読み取り権限がありません: {path}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"ディレクトリパス検証エラー: {path} - {str(e)}")
+            return False
         
     def collect_files(self, directories: List[str]) -> List[Dict]:
         """ファイル列挙・収集処理"""
