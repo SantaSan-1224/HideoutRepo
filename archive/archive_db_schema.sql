@@ -1,4 +1,4 @@
--- アーカイブシステム データベース作成スクリプト (更新版)
+-- アーカイブシステム データベース作成スクリプト (8桁対応版)
 -- PostgreSQL用
 
 -- データベース作成（必要に応じて）
@@ -7,13 +7,12 @@
 -- テーブル作成前の準備
 DROP TABLE IF EXISTS archive_history CASCADE;
 
--- アーカイブ履歴テーブル (成功のみ記録)
+-- アーカイブ履歴テーブル (成功のみ記録、8桁社員番号対応)
 CREATE TABLE archive_history (
     id BIGSERIAL PRIMARY KEY,
     request_id VARCHAR(50) NOT NULL,
-    requester VARCHAR(7) NOT NULL CHECK (requester ~ '^\d{7}$'),
+    requester VARCHAR(8) NOT NULL CHECK (requester ~ '^\d{8}$'),
     request_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    approval_date TIMESTAMP,
     original_file_path TEXT NOT NULL,
     s3_path TEXT NOT NULL,
     archive_date TIMESTAMP NOT NULL,
@@ -79,9 +78,9 @@ INSERT INTO archive_history (
     archive_date,
     file_size
 ) VALUES 
-    ('REQ-2025-001', '1234567', '2025-01-15 10:00:00', '\\\\fileserver\\dept1\\project\\file1.txt', 'archive/dept1/project/file1.txt', '2025-01-15 10:30:00', 1024),
-    ('REQ-2025-002', '1234568', '2025-01-16 14:30:00', '\\\\fileserver\\dept2\\archive\\file2.pdf', 'archive/dept2/archive/file2.pdf', '2025-01-16 15:00:00', 2048),
-    ('REQ-2025-003', '1234569', '2025-01-17 09:15:00', '\\\\fileserver\\dept1\\temp\\file3.xlsx', 'archive/dept1/temp/file3.xlsx', '2025-01-17 09:45:00', 4096);
+    ('REQ-2025-001', '12345678', '2025-01-15 10:00:00', '\\\\fileserver\\dept1\\project\\file1.txt', 's3://bucket/fileserver/dept1/project/file1.txt', '2025-01-15 10:30:00', 1024),
+    ('REQ-2025-002', '12345679', '2025-01-16 14:30:00', '\\\\fileserver\\dept2\\archive\\file2.pdf', 's3://bucket/fileserver/dept2/archive/file2.pdf', '2025-01-16 15:00:00', 2048),
+    ('REQ-2025-003', '12345680', '2025-01-17 09:15:00', '\\\\fileserver\\dept1\\temp\\file3.xlsx', 's3://bucket/fileserver/dept1/temp/file3.xlsx', '2025-01-17 09:45:00', 4096);
 
 -- 動作確認用クエリ
 SELECT * FROM archive_history ORDER BY created_at DESC;
