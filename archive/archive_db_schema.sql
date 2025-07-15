@@ -22,20 +22,14 @@ CREATE TABLE archive_history (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- インデックス作成
--- 依頼者での検索用
+-- インデックス作成（最低限）
+-- 依頼者での検索用（必須）
 CREATE INDEX idx_archive_history_requester ON archive_history(requester);
 
--- 依頼日時での検索用（範囲検索が多い想定）
+-- 依頼日時での検索用（必須）
 CREATE INDEX idx_archive_history_request_date ON archive_history(request_date);
 
--- 依頼IDでの検索用
-CREATE INDEX idx_archive_history_request_id ON archive_history(request_id);
-
--- 元ファイルパスでの検索用（部分一致検索が多い想定）
-CREATE INDEX idx_archive_history_original_file_path ON archive_history USING gin(original_file_path gin_trgm_ops);
-
--- 複合インデックス（よく使われる組み合わせ）
+-- 複合インデックス（依頼者+日付での絞り込み用）
 CREATE INDEX idx_archive_history_requester_date ON archive_history(requester, request_date);
 
 -- updated_atの自動更新用トリガー関数
