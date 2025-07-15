@@ -590,8 +590,36 @@ class ArchiveProcessor:
         """アーカイブ処理エラー用のエラーCSV生成"""
         if not failed_items:
             return None
-        # TODO: 実装
-        return "error_output.csv"
+            
+        self.logger.info("アーカイブエラーCSVファイル生成開始")
+        
+        try:
+            # エラーCSVのパス生成（元CSVと同じ場所）
+            original_path = Path(original_csv_path)
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            error_csv_path = original_path.parent / f"{original_path.stem}_archive_errors_{timestamp}.csv"
+            
+            # エラーCSVの生成
+            with open(error_csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = ['ファイルパス', 'ファイルサイズ', 'ディレクトリ', 'エラー理由']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                writer.writeheader()
+                for item in failed_items:
+                    writer.writerow({
+                        'ファイルパス': item.get('file_path', ''),
+                        'ファイルサイズ': item.get('file_size', ''),
+                        'ディレクトリ': item.get('directory', ''),
+                        'エラー理由': item.get('error', '不明なエラー')
+                    })
+            
+            self.logger.info(f"アーカイブエラーCSVファイル生成完了: {error_csv_path}")
+            self.logger.info(f"エラーファイル数: {len(failed_items)}")
+            return str(error_csv_path)
+            
+        except Exception as e:
+            self.logger.error(f"アーカイブエラーCSV生成失敗: {str(e)}")
+            return None
         
     def print_statistics(self) -> None:
         """処理統計の表示"""
@@ -645,8 +673,13 @@ class ArchiveProcessor:
             # 6. アーカイブ処理エラー処理
             failed_items = [r for r in processed_results if not r.get('success', False)]
             if failed_items:
-                error_csv_path = self.generate_error_csv(failed_items, csv_path)
-                self.logger.warning(f"アーカイブエラーが発生したファイルがあります: {error_csv_path}")
+                archive_error_csv = self.generate_error_csv(failed_items, csv_path)
+                if archive_error_csv:
+                    self.logger.warning(f"アーカイブエラーが発生したファイルがあります: {archive_error_csv}")
+                else:
+                    self.logger.error("アーカイブエラーCSVの生成に失敗しました")
+            else:
+                self.logger.info("全てのファイルが正常にアーカイブされました")
                 
             self.stats['processed_files'] = len([r for r in processed_results if r.get('success', False)])
             self.stats['failed_files'] = len(failed_items)
