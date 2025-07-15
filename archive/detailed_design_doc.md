@@ -36,23 +36,14 @@
 | requester          | VARCHAR(7)  | NOT NULL, CHECK                     | 依頼者（社員番号 7 桁）  |
 | request_date       | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 依頼日時                 |
 | approval_date      | TIMESTAMP   |                                     | 承認日時                 |
-| process_status     | VARCHAR(20) | NOT NULL, DEFAULT 'pending'         | 処理状況                 |
 | original_file_path | TEXT        | NOT NULL                            | 元ファイルパス           |
-| s3_path            | TEXT        |                                     | S3 パス                  |
-| archive_date       | TIMESTAMP   |                                     | アーカイブ日時           |
+| s3_path            | TEXT        | NOT NULL                            | S3 パス                  |
+| archive_date       | TIMESTAMP   | NOT NULL                            | アーカイブ日時           |
 | file_size          | BIGINT      | CHECK >= 0                          | ファイルサイズ（バイト） |
-| process_result     | TEXT        |                                     | 処理結果・エラー詳細     |
 | created_at         | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時                 |
 | updated_at         | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新日時                 |
 
-#### 2.1.2 処理状況の値
-
-- `pending`: 承認待ち
-- `approved`: 承認済み
-- `processing`: 処理中
-- `completed`: 完了
-- `error`: エラー
-- `cancelled`: キャンセル
+**注意**: S3 アップロード成功時のみ記録するため、process_status、process_result カラムは削除
 
 ### 2.2 インデックス設計
 
@@ -60,7 +51,6 @@
 -- 検索用インデックス
 CREATE INDEX idx_archive_history_requester ON archive_history(requester);
 CREATE INDEX idx_archive_history_request_date ON archive_history(request_date);
-CREATE INDEX idx_archive_history_process_status ON archive_history(process_status);
 CREATE INDEX idx_archive_history_request_id ON archive_history(request_id);
 
 -- ファイルパス検索用（部分一致）
@@ -68,7 +58,6 @@ CREATE INDEX idx_archive_history_original_file_path ON archive_history USING gin
 
 -- 複合インデックス
 CREATE INDEX idx_archive_history_requester_date ON archive_history(requester, request_date);
-CREATE INDEX idx_archive_history_status_date ON archive_history(process_status, request_date);
 ```
 
 ## 3. アーカイブスクリプト設計
