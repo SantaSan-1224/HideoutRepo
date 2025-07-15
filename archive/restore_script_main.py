@@ -340,12 +340,260 @@ class RestoreProcessor:
         """S3復元リクエスト送信"""
         self.logger.info("S3復元リクエスト送信開始")
         
-        # TODO: 実装
-        self.logger.info("S3復元リクエスト送信完了")
-        return restore_requests
+        if not restore_requests:
+            self.logger.info("復元リクエスト対象がありません")
+            return restore_requests
+        
+        try:
+            # S3クライアント初期化
+            s3_client = self._initialize_s3_client()
+            
+            # 復元設定
+            restore_config = self.config.get('restore', {})
+            restore_tier = restore_config.get('restore_tier', 'Standard')  # Standard, Expedited, Bulk
+            
+            self.logger.info(f"S3復元リクエスト送信")
+            self.logger.info(f"復元ティア: {restore_tier}")
+            self.logger.info(f"処理対象ファイル数: {len(restore_requests)}")
+            
+            successful_requests = 0
+            failed_requests = 0
+            
+            for request in restore_requests:
+                bucket = request.get('bucket')
+                key = request.get('key')
+                original_path = request.get('original_file_path')
+                
+                if not bucket or not key:
+                    request['restore_status'] = 'failed'
+                    request['error'] = 'S3パス情報が不完全です'
+                    failed_requests += 1
+                    self.logger.error(f"✗ 復元リクエスト失敗: {original_path} - S3パス情報不完全")
+                    continue
+                
+                try:
+                    # S3復元リクエスト送信
+                    self.logger.info(f"復元リクエスト送信中: {bucket}/{key}")
+                    
+                    s3_client.restore_object(
+                        Bucket=bucket,
+                        Key=key,
+                        RestoreRequest={
+                            'Days': 7,  # 復元後の保持日数
+                            'GlacierJobParameters': {
+                                'Tier': restore_tier
+                            }
+                        }
+                    )
+                    
+                    # 成功
+                    request['restore_status'] = 'requested'
+                    request['restore_request_time'] = datetime.datetime.now().isoformat()
+                    request['restore_tier'] = restore_tier
+                    successful_requests += 1
+                    self.logger.info(f"✓ 復元リクエスト送信成功: {original_path}")
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    
+                    # 既に復元中の場合は正常として扱う
+                    if 'RestoreAlreadyInProgress' in error_msg:
+                        request['restore_status'] = 'already_in_progress'
+                        request['restore_request_time'] = datetime.datetime.now().isoformat()
+                        successful_requests += 1
+                        self.logger.info(f"✓ 復元リクエスト既に進行中: {original_path}")
+                    else:
+                        request['restore_status'] = 'failed'
+                        request['error'] = error_msg
+                        failed_requests += 1
+                        self.logger.error(f"✗ 復元リクエスト失敗: {original_path} - {error_msg}")
+            
+            # 統計更新
+            self.stats['restore_requested'] = successful_requests
+            self.stats['failed_files'] += failed_requests
+            
+            self.logger.info("S3復元リクエスト送信完了")
+            self.logger.info(f"  - 成功: {successful_requests}件")
+            self.logger.info(f"  - 失敗: {failed_requests}件")
+            
+            return restore_requests
+            
+        except Exception as e:
+            self.logger.error(f"S3復元リクエスト処理でエラーが発生: {str(e)}")
+            # 全リクエストを失敗としてマーク
+            for request in restore_requests:
+                request['restore_status'] = 'failed'
+                request['error'] = f'S3初期化エラー: {str(e)}'
+            return restore_requests
+    
+    def _initialize_s3_client(self):
+        """S3クライアント初期化（アーカイブスクリプトと共通）"""
+        try:
+            import boto3
+            from botocore.config import Config
+            
+            # AWS設定の取得
+            aws_config = self.config.get('aws', {})
+            region = aws_config.get('region', 'ap-northeast-1').strip()
+            vpc_endpoint_url = aws_config.get('vpc_endpoint_url', '').strip()
+            
+            # boto3設定
+            config = Config(
+                region_name=region,
+                retries={
+                    'max_attempts': 3,
+                    'mode': 'adaptive'
+                }
+            )
+            
+            # S3クライアント作成
+            if vpc_endpoint_url:
+                self.logger.info(f"VPCエンドポイント経由で接続: {vpc_endpoint_url}")
+                s3_client = boto3.client('s3', endpoint_url=vpc_endpoint_url, config=config)
+            else:
+                self.logger.info("標準エンドポイント経由で接続")
+                s3_client = boto3.client('s3', config=config)
+            
+            self.logger.info("S3クライアント初期化成功")
+            return s3_client
+            
+        except ImportError:
+            raise Exception("boto3がインストールされていません。pip install boto3 を実行してください。")
+        except Exception as e:
+            raise Exception(f"S3クライアント初期化失敗: {str(e)}")
+    
+    def check_restore_completion(self, restore_requests: List[Dict]) -> List[Dict]:
+        """復元完了確認処理"""
+        self.logger.info("復元完了確認開始")
+        
+        if not restore_requests:
+            self.logger.info("復元確認対象がありません")
+            return restore_requests
+        
+        # 復元リクエスト済みのファイルのみ確認
+        pending_requests = [req for req in restore_requests 
+                           if req.get('restore_status') in ['requested', 'already_in_progress']]
+        
+        if not pending_requests:
+            self.logger.info("復元確認対象ファイルがありません")
+            return restore_requests
+        
+        self.logger.info(f"復元ステータス確認対象: {len(pending_requests)}件")
+        
+        try:
+            # S3クライアント初期化
+            s3_client = self._initialize_s3_client()
+            
+            completed_count = 0
+            still_pending_count = 0
+            failed_count = 0
+            
+            for request in pending_requests:
+                bucket = request.get('bucket')
+                key = request.get('key')
+                original_path = request.get('original_file_path')
+                
+                if not bucket or not key:
+                    self.logger.error(f"S3パス情報不完全: {original_path}")
+                    continue
+                
+                try:
+                    # S3オブジェクトのメタデータを取得してrestoreステータスを確認
+                    self.logger.debug(f"復元ステータス確認中: {bucket}/{key}")
+                    
+                    response = s3_client.head_object(Bucket=bucket, Key=key)
+                    
+                    # Restoreヘッダーの確認
+                    restore_header = response.get('Restore')
+                    
+                    if restore_header is None:
+                        # Restoreヘッダーがない = まだ復元リクエストが処理されていない
+                        request['restore_status'] = 'pending'
+                        request['restore_check_time'] = datetime.datetime.now().isoformat()
+                        still_pending_count += 1
+                        self.logger.info(f"復元処理中: {original_path}")
+                        
+                    elif 'ongoing-request="true"' in restore_header:
+                        # 復元処理が進行中
+                        request['restore_status'] = 'in_progress'
+                        request['restore_check_time'] = datetime.datetime.now().isoformat()
+                        still_pending_count += 1
+                        self.logger.info(f"復元進行中: {original_path}")
+                        
+                    elif 'ongoing-request="false"' in restore_header:
+                        # 復元完了
+                        request['restore_status'] = 'completed'
+                        request['restore_completed_time'] = datetime.datetime.now().isoformat()
+                        request['restore_check_time'] = datetime.datetime.now().isoformat()
+                        completed_count += 1
+                        self.logger.info(f"✓ 復元完了: {original_path}")
+                        
+                        # 復元有効期限の抽出（可能であれば）
+                        try:
+                            # 例: 'ongoing-request="false", expiry-date="Fri, 21 Dec 2012 00:00:00 GMT"'
+                            if 'expiry-date=' in restore_header:
+                                expiry_part = restore_header.split('expiry-date=')[1]
+                                expiry_date = expiry_part.split('"')[1]
+                                request['restore_expiry'] = expiry_date
+                                self.logger.debug(f"復元有効期限: {expiry_date}")
+                        except Exception:
+                            pass  # 有効期限の抽出に失敗しても処理継続
+                            
+                    else:
+                        # 不明なステータス
+                        request['restore_status'] = 'unknown'
+                        request['restore_check_time'] = datetime.datetime.now().isoformat()
+                        request['error'] = f"不明な復元ステータス: {restore_header}"
+                        still_pending_count += 1
+                        self.logger.warning(f"不明な復元ステータス: {original_path} - {restore_header}")
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    
+                    # 特定のエラーハンドリング
+                    if 'NoSuchKey' in error_msg:
+                        request['restore_status'] = 'failed'
+                        request['error'] = 'S3にファイルが見つかりません'
+                    elif 'InvalidObjectState' in error_msg:
+                        request['restore_status'] = 'failed'
+                        request['error'] = 'オブジェクトがGlacierストレージクラスではありません'
+                    else:
+                        request['restore_status'] = 'check_failed'
+                        request['error'] = f'復元ステータス確認エラー: {error_msg}'
+                    
+                    request['restore_check_time'] = datetime.datetime.now().isoformat()
+                    failed_count += 1
+                    self.logger.error(f"✗ 復元ステータス確認失敗: {original_path} - {error_msg}")
+            
+            # 統計更新
+            self.stats['restore_completed'] = completed_count
+            
+            self.logger.info("復元完了確認完了")
+            self.logger.info(f"  - 復元完了: {completed_count}件")
+            self.logger.info(f"  - 処理中: {still_pending_count}件")
+            self.logger.info(f"  - 確認失敗: {failed_count}件")
+            
+            # 完了ファイルがある場合の案内
+            if completed_count > 0:
+                self.logger.info(f"復元完了ファイルがあります。ダウンロード処理を実行してください:")
+                self.logger.info(f"python restore_script_main.py [csv_path] {self.request_id} --download-only")
+            
+            if still_pending_count > 0:
+                self.logger.info(f"まだ処理中のファイルがあります。しばらく待ってから再度確認してください")
+            
+            return restore_requests
+            
+        except Exception as e:
+            self.logger.error(f"復元完了確認処理でエラーが発生: {str(e)}")
+            # 全リクエストにエラーマーク
+            for request in pending_requests:
+                request['restore_status'] = 'check_failed'
+                request['error'] = f'S3接続エラー: {str(e)}'
+                request['restore_check_time'] = datetime.datetime.now().isoformat()
+            return restore_requests
         
     def wait_for_restore_completion(self, restore_requests: List[Dict]) -> List[Dict]:
-        """復元完了待機"""
+        """復元完了待機処理"""
         self.logger.info("復元完了待機開始")
         
         # TODO: 実装
@@ -421,6 +669,7 @@ class RestoreProcessor:
             mode: 実行モード
                 - 'request': 復元リクエスト送信のみ
                 - 'download': ダウンロード実行のみ
+                - 'check': 復元ステータス確認のみ
         """
         self.stats['start_time'] = datetime.datetime.now()
         self.request_id = request_id
@@ -432,6 +681,8 @@ class RestoreProcessor:
                 return self._run_restore_request(csv_path)
             elif mode == 'download':
                 return self._run_download_files(csv_path)
+            elif mode == 'check':
+                return self._run_check_status(csv_path)
             else:
                 self.logger.error(f"無効なモード: {mode}")
                 return 1
@@ -488,9 +739,31 @@ class RestoreProcessor:
         self.logger.info(f"復元リクエスト送信完了 - {self.stats['restore_requested']}件")
         if failed_requests:
             self.logger.warning(f"復元不可ファイル - {len(failed_requests)}件")
-        self.logger.info("48時間後にダウンロード処理を実行してください:")
-        self.logger.info(f"python restore_script_main.py {csv_path} {self.request_id} --download-only")
+        self.logger.info("48時間後に復元ステータスを確認してください:")
+        self.logger.info(f"python restore_script_main.py {csv_path} {self.request_id} --check-only")
         
+        return 0
+    
+    def _run_check_status(self, csv_path: str) -> int:
+        """復元ステータス確認処理"""
+        self.logger.info("=== 復元ステータス確認モード ===")
+        
+        # 1. ステータスファイル読み込み
+        restore_requests = self._load_restore_status()
+        if not restore_requests:
+            self.logger.error("復元ステータスファイルが見つかりません")
+            self.logger.error("先に復元リクエスト送信を実行してください")
+            return 1
+        
+        self.stats['total_files'] = len(restore_requests)
+        
+        # 2. 復元完了確認
+        restore_requests = self.check_restore_completion(restore_requests)
+        
+        # 3. ステータスファイル更新
+        self._save_restore_status(restore_requests)
+        
+        self.logger.info(f"復元ステータス確認完了")
         return 0
     
     def _run_download_files(self, csv_path: str) -> int:
@@ -506,7 +779,7 @@ class RestoreProcessor:
         
         self.stats['total_files'] = len(restore_requests)
         
-        # 2. 復元完了確認
+        # 2. 復元完了確認（最新ステータス取得）
         restore_requests = self.check_restore_completion(restore_requests)
         
         # 3. ファイルダウンロード・配置
@@ -564,16 +837,6 @@ class RestoreProcessor:
         except Exception as e:
             self.logger.error(f"復元ステータス読み込みエラー: {str(e)}")
             return []
-    
-    def check_restore_completion(self, restore_requests: List[Dict]) -> List[Dict]:
-        """復元完了確認"""
-        self.logger.info("復元完了確認開始")
-        
-        # TODO: S3 APIで復元ステータス確認
-        # TODO: 完了したファイルのみマークを更新
-        
-        self.logger.info("復元完了確認完了")
-        return restore_requests
 
 
 def main():
@@ -588,6 +851,8 @@ def main():
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument('--request-only', action='store_true',
                            help='復元リクエスト送信のみ実行')
+    mode_group.add_argument('--check-only', action='store_true',
+                           help='復元ステータス確認のみ実行')
     mode_group.add_argument('--download-only', action='store_true',
                            help='ダウンロード実行のみ実行')
     
@@ -601,11 +866,13 @@ def main():
     # 実行モード決定
     if args.request_only:
         mode = 'request'
+    elif args.check_only:
+        mode = 'check'
     elif args.download_only:
         mode = 'download'
     else:
         # このケースは発生しないはず（mutually_exclusive_group + required=True）
-        print("実行モードを指定してください: --request-only または --download-only")
+        print("実行モードを指定してください: --request-only, --check-only, または --download-only")
         sys.exit(1)
         
     # 復元処理の実行
