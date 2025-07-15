@@ -1,0 +1,49 @@
+2025-07-15 15:21:55,726 - archive_processor - INFO - ログファイル: logs\archive_20250715_152155.log
+2025-07-15 15:21:55,727 - archive_processor - INFO - アーカイブ処理開始 - Request ID: REQ-2025-001
+2025-07-15 15:21:55,729 - archive_processor - INFO - CSVファイルの読み込み開始: test_directories.csv
+2025-07-15 15:21:55,730 - archive_processor - INFO - 読み込み行数: 2
+2025-07-15 15:21:55,731 - archive_processor - INFO - 行 1: ヘッダー行をスキップ
+2025-07-15 15:21:55,731 - archive_processor - INFO - 行 2: パス検証中 - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com... (全長: 65文字)
+2025-07-15 15:21:55,734 - archive_processor - INFO - 行 2: 有効なパス追加 ✓
+2025-07-15 15:21:55,735 - archive_processor - INFO - CSV読み込み完了
+2025-07-15 15:21:55,735 - archive_processor - INFO -   - 有効ディレクトリ数: 1
+2025-07-15 15:21:55,736 - archive_processor - INFO -   - エラー項目数: 0
+2025-07-15 15:21:55,736 - archive_processor - INFO - ファイル収集開始
+2025-07-15 15:21:55,736 - archive_processor - INFO - ディレクトリ処理開始: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...
+2025-07-15 15:21:55,741 - archive_processor - INFO - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...: 2個のファイルを収集
+2025-07-15 15:21:55,741 - archive_processor - INFO - ファイル収集完了 - 総ファイル数: 2
+2025-07-15 15:21:55,741 - archive_processor - INFO - S3アップロード開始
+2025-07-15 15:21:56,086 - archive_processor - INFO - S3バケット名: 's3-rdfs-qa-fsgw-002-891612560424'
+2025-07-15 15:21:56,086 - archive_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-07-15 15:21:56,719 - archive_processor - INFO - S3バケット接続確認OK: 's3-rdfs-qa-fsgw-002-891612560424'
+2025-07-15 15:21:56,719 - archive_processor - INFO - ストレージクラス 'DEEP_ARCHIVE' を使用
+2025-07-15 15:21:56,721 - archive_processor - INFO - S3バケット: s3-rdfs-qa-fsgw-002-891612560424
+2025-07-15 15:21:56,721 - archive_processor - INFO - ストレージクラス: DEEP_ARCHIVE
+2025-07-15 15:21:56,722 - archive_processor - INFO - 処理対象ファイル数: 2
+2025-07-15 15:21:56,722 - archive_processor - INFO - [1/2] アップロード中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt (0 bytes)
+2025-07-15 15:21:56,764 - archive_processor - WARNING - アップロード失敗 (試行 1/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt to s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:sts::891612560424:assumed-role/iam-role-fhplat-shared-SSMRole/i-08a0511ad3a423d43 is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt" because no identity-based policy allows the s3:PutObject action
+2025-07-15 15:21:58,057 - archive_processor - WARNING - アップロード失敗 (試行 2/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt to s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:sts::891612560424:assumed-role/iam-role-fhplat-shared-SSMRole/i-08a0511ad3a423d43 is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt" because no identity-based policy allows the s3:PutObject action
+2025-07-15 15:22:00,406 - archive_processor - ERROR - ✗ アップロード失敗: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt - 最大リトライ回数到達: Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt to s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:sts::891612560424:assumed-role/iam-role-fhplat-shared-SSMRole/i-08a0511ad3a423d43 is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt" because no identity-based policy allows the s3:PutObject action
+2025-07-15 15:22:00,406 - archive_processor - INFO - [2/2] アップロード中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt (0 bytes)
+2025-07-15 15:22:00,719 - archive_processor - WARNING - アップロード失敗 (試行 1/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt to s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/山田太郎}.txt: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:sts::891612560424:assumed-role/iam-role-fhplat-shared-SSMRole/i-08a0511ad3a423d43 is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/山田太郎}.txt" because no identity-based policy allows the s3:PutObject action
+2025-07-15 15:22:02,025 - archive_processor - WARNING - アップロード失敗 (試行 2/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt to s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/山田太郎}.txt: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:sts::891612560424:assumed-role/iam-role-fhplat-shared-SSMRole/i-08a0511ad3a423d43 is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/山田太郎}.txt" because no identity-based policy allows the s3:PutObject action
+2025-07-15 15:22:04,327 - archive_processor - ERROR - ✗ アップロード失敗: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt - 最大リトライ回数到達: Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt to s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/山田太郎}.txt: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:sts::891612560424:assumed-role/iam-role-fhplat-shared-SSMRole/i-08a0511ad3a423d43 is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/山田太郎}.txt" because no identity-based policy allows the s3:PutObject action
+2025-07-15 15:22:04,327 - archive_processor - INFO - S3アップロード完了
+2025-07-15 15:22:04,331 - archive_processor - INFO -   - 成功: 0件
+2025-07-15 15:22:04,332 - archive_processor - INFO -   - 失敗: 2件
+2025-07-15 15:22:04,332 - archive_processor - INFO - アーカイブ後処理開始
+2025-07-15 15:22:04,333 - archive_processor - INFO - アーカイブ後処理完了
+2025-07-15 15:22:04,333 - archive_processor - INFO - データベース登録開始
+2025-07-15 15:22:04,334 - archive_processor - INFO - データベース登録完了
+2025-07-15 15:22:04,334 - archive_processor - INFO - アーカイブエラーCSVファイル生成開始
+2025-07-15 15:22:04,337 - archive_processor - INFO - アーカイブエラーCSVファイル生成完了: test_directories_archive_errors_20250715_152204.csv
+2025-07-15 15:22:04,338 - archive_processor - INFO - エラーファイル数: 2
+2025-07-15 15:22:04,339 - archive_processor - WARNING - アーカイブエラーが発生したファイルがあります: test_directories_archive_errors_20250715_152204.csv
+2025-07-15 15:22:04,339 - archive_processor - INFO - アーカイブ処理完了
+2025-07-15 15:22:04,339 - archive_processor - INFO - === 処理統計 ===
+2025-07-15 15:22:04,340 - archive_processor - INFO - 処理時間: 0:00:08.612735
+2025-07-15 15:22:04,340 - archive_processor - INFO - CSV検証エラー数: 0
+2025-07-15 15:22:04,341 - archive_processor - INFO - 総ファイル数: 2
+2025-07-15 15:22:04,341 - archive_processor - INFO - 成功ファイル数: 0
+2025-07-15 15:22:04,342 - archive_processor - INFO - 失敗ファイル数: 2
+2025-07-15 15:22:04,342 - archive_processor - INFO - 総ファイルサイズ: 0 bytes
