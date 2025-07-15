@@ -76,13 +76,26 @@ class ArchiveProcessor:
     def load_config(config_path: str) -> Dict
     def setup_logger() -> logging.Logger
     def validate_csv_input(csv_path: str) -> Tuple[List[str], List[Dict]]
+    def _validate_directory_path_with_details(path: str) -> Dict
     def collect_files(directories: List[str]) -> List[Dict]
     def archive_to_s3(files: List[Dict]) -> List[Dict]
+    def _initialize_s3_client() -> boto3.client
+    def _validate_storage_class(storage_class: str) -> str
+    def _generate_s3_key(file_path: str) -> str
+    def _upload_file_with_retry(...) -> Dict
     def create_archived_files(results: List[Dict]) -> List[Dict]
     def save_to_database(results: List[Dict]) -> None
-    def generate_error_csv(error_items: List[Dict], csv_path: str) -> str
+    def generate_csv_error_file(csv_path: str) -> Optional[str]
+    def generate_error_csv(failed_items: List[Dict], csv_path: str) -> Optional[str]
     def run(csv_path: str, request_id: str) -> int
 ```
+
+**インスタンス変数**:
+
+- `self.config`: 設定情報
+- `self.logger`: ログ出力
+- `self.csv_errors`: CSV 検証エラー項目のリスト
+- `self.stats`: 処理統計情報
 
 ### 3.2 処理フロー詳細
 
@@ -94,14 +107,22 @@ class ArchiveProcessor:
    - 空行スキップ
    - ヘッダー行検出・スキップ
    - パス正規化
-3. ディレクトリ検証
+3. ディレクトリ検証（詳細エラー理由付き）
    - 存在チェック
    - アクセス権限チェック
-   - パス長制限チェック
-   - 不正文字チェック
-4. エラー項目記録
+   - パス長制限チェック（260文字）
+   - 不正文字チェック（<>:"|?*）
+4. エラー項目記録（処理継続）
+   - self.csv_errorsにエラー詳細を保存
+   - 有効なディレクトリとエラー項目をタプルで返却
 5. エラーCSV生成（必要時）
+   - logsディレクトリに再試行用フォーマットで出力
 ```
+
+**戻り値**: `Tuple[List[str], List[Dict]]`
+
+- List[str]: 有効なディレクトリパス
+- List[Dict]: エラー項目（line_number, path, error_reason, original_line）
 
 #### 3.2.2 ファイル収集処理
 
@@ -118,16 +139,29 @@ class ArchiveProcessor:
 
 ```
 1. boto3 S3クライアント初期化
-2. VPCエンドポイント経由接続
-3. S3キー生成（サーバ名ベース）
+   - VPCエンドポイント対応
+   - 接続テスト実行
+   - ストレージクラス自動変換（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
+2. S3キー生成（サーバ名ベース）
    - UNCパス: \\server\share\path → server/share/path
    - ローカルパス: C:\path → local_c/path
-4. ファイル単位でのアップロード
+   - フォールバック: fallback/timestamp/filename
+3. ファイル単位でのアップロード
    - Deep Archive直接指定
-   - エラーハンドリング・リトライ
-   - 進捗ログ出力
+   - 指数バックオフリトライ（最大3回）
+   - 権限エラー・ファイル不存在はリトライしない
+4. 進捗ログ出力
+   - [n/total] 形式の進捗表示
+   - 成功/失敗の詳細ログ
 5. アップロード結果記録
+   - success, error, s3_key, file_size等の情報を保持
 ```
+
+**エラーハンドリング**:
+
+- FileNotFoundError: リトライなし
+- PermissionError: リトライなし
+- その他のエラー: 指数バックオフでリトライ
 
 #### 3.2.4 アーカイブ後処理
 
@@ -157,7 +191,7 @@ class ArchiveProcessor:
 
 #### 3.3.2 エラー CSV 出力仕様
 
-**再試行用 CSV**: `{元ファイル名}_retry_{YYYYMMDD_HHMMSS}.csv`
+**CSV 検証エラー用**: `logs/{元ファイル名}_csv_retry_{YYYYMMDD_HHMMSS}.csv`
 
 - 元 CSV と同じフォーマット（再実行可能）
 - エラーが発生したパスのみを記録
@@ -169,19 +203,32 @@ Directory Path
 \\another\invalid\path
 ```
 
-**アーカイブエラー**: `{元ファイル名}_archive_errors_{YYYYMMDD_HHMMSS}.csv`
+**アーカイブエラー用**: `logs/{元ファイル名}_archive_retry_{YYYYMMDD_HHMMSS}.csv`
+
+- 元 CSV と同じフォーマット（再実行可能）
+- 失敗したファイルを含むディレクトリを重複除去して記録
+- エラー統計をログに出力
 
 ```csv
-ファイルパス,エラー理由,ファイルサイズ,ディレクトリ
-C:\temp\file.txt,S3アップロード失敗,1024,C:\temp
+Directory Path
+\\server\share\failed_directory1
+\\server\share\failed_directory2
 ```
+
+**出力先**: 全て logs ディレクトリに統一
 
 **エラー理由のログ出力例**:
 
 ```
-2025-07-15 10:30:25 - archive_processor - ERROR - 行 2: ディレクトリが存在しません ✗
-2025-07-15 10:30:25 - archive_processor - ERROR - 行 3: 不正な文字が含まれています: | ✗
-2025-07-15 10:30:25 - archive_processor - ERROR - 行 4: 読み取り権限がありません ✗
+CSV検証エラー:
+行 2: ディレクトリが存在しません ✗
+行 3: 不正な文字が含まれています: | ✗
+
+アーカイブエラー統計:
+エラー理由の内訳:
+  - AccessDenied: 5件
+  - NoSuchBucket: 3件
+  - ファイルアクセス権限がありません: 2件
 ```
 
 ### 3.4 設定ファイル設計
@@ -194,7 +241,7 @@ C:\temp\file.txt,S3アップロード失敗,1024,C:\temp
     "region": "ap-northeast-1",
     "s3_bucket": "your-archive-bucket",
     "storage_class": "DEEP_ARCHIVE",
-    "vpc_endpoint_url": "https://..."
+    "vpc_endpoint_url": "https://bucket.vpce-xxx.s3.ap-northeast-1.vpce.amazonaws.com"
   },
   "database": {
     "host": "localhost",
@@ -219,6 +266,13 @@ C:\temp\file.txt,S3アップロード失敗,1024,C:\temp
   }
 }
 ```
+
+#### 3.4.2 設定値の自動調整
+
+- **ストレージクラス**: `GLACIER_DEEP_ARCHIVE` → `DEEP_ARCHIVE` 自動変換
+- **バケット名**: 前後スペースの自動除去
+- **デフォルト値**: 設定が不足している場合の自動補完
+- **設定読み込み失敗**: デフォルト設定で継続実行
 
 ## 4. Streamlit アプリケーション設計
 
@@ -369,9 +423,14 @@ archive/path/to/file2.txt,C:\restored\files\
 
 ### 8.1 短期拡張（3 ヶ月以内）
 
+- [x] CSV 検証エラー処理の改善（処理継続・エラー CSV 生成）
+- [x] S3 アップロード機能の実装（boto3、VPC エンドポイント対応）
+- [x] エラーハンドリングの強化（再試行可能 CSV フォーマット）
+- [x] S3 パス構造の改善（サーバ名ベース）
+- [ ] アーカイブ後処理の実装（元ファイル削除・空ファイル作成）
+- [ ] データベース登録処理の実装
 - [ ] 復元スクリプトの実装
 - [ ] 進捗確認機能の実装
-- [ ] 通知機能の検討
 
 ### 8.2 中期拡張（6 ヶ月以内）
 
@@ -402,20 +461,84 @@ python archive_script_main.py /path/to/archive_request.csv REQ-YYYY-XXX
 # 4. 処理結果確認
 ls -la logs/
 tail -f logs/archive_YYYYMMDD_HHMMSS.log
+
+# 5. エラー発生時の再実行
+python archive_script_main.py logs/archive_request_archive_retry_YYYYMMDD_HHMMSS.csv REQ-YYYY-XXX-RETRY
 ```
 
-### 9.2 トラブルシューティング
+### 9.2 エラー対応フロー
 
-- **CSV 読み込みエラー**: 文字エンコーディング確認
+```
+1. ログファイルでエラー詳細を確認
+2. エラー種別に応じた対応
+   - CSV検証エラー: パス修正後、再試行用CSVで再実行
+   - アーカイブエラー: 権限・接続確認後、再試行用CSVで再実行
+3. 再実行用CSVは logs/ ディレクトリに自動生成される
+4. エラー統計でエラー理由の分布を確認
+```
+
+### 9.3 S3 パス構造の確認
+
+```bash
+# アップロード結果の確認
+aws s3 ls s3://bucket-name/server-name/ --recursive
+
+# 期待されるパス構造
+s3://bucket/amznfsxbeak7dyp/share/project1/file.txt
+s3://bucket/local_c/temp/file.txt
+```
+
+### 9.4 トラブルシューティング
+
+#### 9.4.1 よくあるエラーと対処法
+
+- **CSV 読み込みエラー**: 文字エンコーディング確認（UTF-8-SIG 推奨）
+- **ストレージクラスエラー**: `GLACIER_DEEP_ARCHIVE` → `DEEP_ARCHIVE` に自動変換されるか確認
 - **S3 接続エラー**: VPC エンドポイント・認証情報確認
+- **権限エラー**: IAM ロールに`s3:PutObject`権限があるか確認
 - **データベース接続エラー**: 接続設定・ネットワーク確認
 - **ファイルアクセスエラー**: 権限・パス存在確認
 
+#### 9.4.2 ログの確認ポイント
+
+```
+# 成功パターン
+✓ アップロード成功: server/share/project1/file.txt
+
+# 失敗パターン
+✗ アップロード失敗: \\server\share\file.txt - AccessDenied
+エラー理由の内訳:
+  - AccessDenied: 5件
+  - NoSuchBucket: 3件
+```
+
+#### 9.4.3 再試行用 CSV 確認
+
+```bash
+# 生成された再試行用CSVの確認
+cat logs/test_directories_archive_retry_20250715_152204.csv
+
+# 元CSVと同じフォーマットか確認
+Directory Path
+\\server\share\failed_directory
+```
+
 ## 10. 更新履歴
 
-| 日付       | バージョン | 更新内容 | 更新者             |
-| ---------- | ---------- | -------- | ------------------ |
-| 2025-07-14 | 1.0        | 初版作成 | システム開発チーム |
+| 日付       | バージョン | 更新内容                                      | 更新者             |
+| ---------- | ---------- | --------------------------------------------- | ------------------ |
+| 2025-07-14 | 1.0        | 初版作成                                      | システム開発チーム |
+| 2025-07-15 | 1.1        | CSV 検証エラー処理改善、S3 アップロード実装   | システム開発チーム |
+| 2025-07-15 | 1.2        | エラー CSV 出力先変更、再試行フォーマット実装 | システム開発チーム |
+
+### 主要な変更内容（v1.2）
+
+- エラー CSV 出力先を logs ディレクトリに統一
+- CSV 検証エラー・アーカイブエラー共に再実行可能フォーマットに変更
+- S3 キー生成をサーバ名ベース構造に改善
+- ストレージクラス自動変換機能追加（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
+- エラー統計の詳細化
+- データベース設計の簡素化（成功レコードのみ保存）
 
 ---
 
