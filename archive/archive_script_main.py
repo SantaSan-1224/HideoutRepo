@@ -440,22 +440,34 @@ class ArchiveProcessor:
             # Windowsパスを正規化
             normalized_path = file_path.replace('\\', '/')
             
-            # UNCパスの場合、サーバ名以降を使用
+            # UNCパスの場合、サーバ名を抽出
             if normalized_path.startswith('//'):
-                # //server/share/path/file.txt -> share/path/file.txt
+                # //server/share/path/file.txt -> server/share/path/file.txt
                 parts = normalized_path[2:].split('/')
-                if len(parts) > 1:
-                    normalized_path = '/'.join(parts[1:])
-            
-            # ドライブレター除去（C:/path/file.txt -> path/file.txt）
-            if len(normalized_path) > 2 and normalized_path[1] == ':':
-                normalized_path = normalized_path[3:]
-            
-            # アーカイブプレフィックスを追加
-            s3_key = f"archive/{normalized_path}"
+                if len(parts) > 0:
+                    server_name = parts[0]
+                    if len(parts) > 1:
+                        # サーバ名をトップレベルフォルダとして使用
+                        relative_path = '/'.join(parts[1:])
+                        s3_key = f"{server_name}/{relative_path}"
+                    else:
+                        s3_key = f"{server_name}/root"
+                else:
+                    s3_key = "unknown_server/unknown_path"
+            # ドライブレター除去（C:/path/file.txt -> local/path/file.txt）
+            elif len(normalized_path) > 2 and normalized_path[1] == ':':
+                drive_letter = normalized_path[0].lower()
+                relative_path = normalized_path[3:]  # C:/ を除去
+                s3_key = f"local_{drive_letter}/{relative_path}"
+            else:
+                # その他の場合
+                s3_key = f"other/{normalized_path}"
             
             # 先頭のスラッシュを除去
             s3_key = s3_key.lstrip('/')
+            
+            # 空の部分を除去
+            s3_key = '/'.join(part for part in s3_key.split('/') if part)
             
             return s3_key
             
@@ -464,7 +476,8 @@ class ArchiveProcessor:
             # フォールバック: ファイル名のみ使用
             import os
             filename = os.path.basename(file_path)
-            return f"archive/fallback/{filename}"
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            return f"fallback/{timestamp}/{filename}"
     
     def _upload_file_with_retry(self, s3_client, file_path: str, bucket_name: str, 
                                s3_key: str, storage_class: str, max_retries: int) -> Dict:

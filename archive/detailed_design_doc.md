@@ -119,11 +119,14 @@ class ArchiveProcessor:
 ```
 1. boto3 S3クライアント初期化
 2. VPCエンドポイント経由接続
-3. ファイル単位でのアップロード
-   - Glacier Deep Archive直接指定
+3. S3キー生成（サーバ名ベース）
+   - UNCパス: \\server\share\path → server/share/path
+   - ローカルパス: C:\path → local_c/path
+4. ファイル単位でのアップロード
+   - Deep Archive直接指定
    - エラーハンドリング・リトライ
    - 進捗ログ出力
-4. アップロード結果記録
+5. アップロード結果記録
 ```
 
 #### 3.2.4 アーカイブ後処理
