@@ -389,7 +389,12 @@ CSV検証エラー:
     "port": 5432,
     "database": "archive_system",
     "user": "postgres",
-    "password": "password"
+    "password": "password",
+    "timeout": 30
+  },
+  "request": {
+    "requester": "1234567",
+    "request_id": "REQ-2025-001"
   },
   "file_server": {
     "base_path": "\\\\server\\share\\",

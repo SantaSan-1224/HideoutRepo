@@ -619,8 +619,121 @@ class ArchiveProcessor:
     def save_to_database(self, results: List[Dict]) -> None:
         """データベース登録処理"""
         self.logger.info("データベース登録開始")
-        # TODO: 実装
-        self.logger.info("データベース登録完了")
+        
+        # アーカイブ後処理完了ファイルのみ登録
+        completed_results = [r for r in results if r.get('archive_completed', False)]
+        
+        if not completed_results:
+            self.logger.info("データベース登録対象ファイルがありません")
+            return
+        
+        self.logger.info(f"データベース登録対象: {len(completed_results)}件")
+        
+        try:
+            # データベース接続
+            conn = self._connect_database()
+            
+            # トランザクション開始
+            with conn:
+                with conn.cursor() as cursor:
+                    # 設定から依頼情報を取得
+                    request_config = self.config.get('request', {})
+                    request_id = request_config.get('request_id', 'UNKNOWN')
+                    requester = request_config.get('requester', '0000000')
+                    
+                    # 現在時刻
+                    current_time = datetime.datetime.now()
+                    
+                    # バケット名を取得（S3 URL生成用）
+                    bucket_name = self.config.get('aws', {}).get('s3_bucket', '')
+                    
+                    # バッチ挿入用のデータ準備
+                    insert_data = []
+                    for result in completed_results:
+                        # S3完全URLの生成
+                        s3_key = result.get('s3_key', '')
+                        s3_url = f"s3://{bucket_name}/{s3_key}" if s3_key else ''
+                        
+                        record = (
+                            request_id,
+                            requester,
+                            current_time,  # request_date
+                            result['file_path'],  # original_file_path
+                            s3_url,  # s3_path
+                            current_time,  # archive_date
+                            result['file_size']
+                        )
+                        insert_data.append(record)
+                    
+                    # バッチ挿入実行
+                    insert_query = """
+                        INSERT INTO archive_history (
+                            request_id, requester, request_date,
+                            original_file_path, s3_path, archive_date, file_size
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """
+                    
+                    cursor.executemany(insert_query, insert_data)
+                    
+                    # 挿入件数確認
+                    inserted_count = cursor.rowcount
+                    self.logger.info(f"データベース挿入完了: {inserted_count}件")
+                    
+                    # コミットは with文で自動実行
+            
+            self.logger.info("データベース登録完了")
+            
+        except Exception as e:
+            self.logger.error(f"データベース登録エラー: {str(e)}")
+            # エラーでも処理は継続（アーカイブ自体は成功しているため）
+            
+        finally:
+            # 接続クローズ
+            try:
+                if 'conn' in locals():
+                    conn.close()
+            except Exception:
+                pass
+    
+    def _connect_database(self):
+        """データベース接続"""
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            
+            # データベース設定取得
+            db_config = self.config.get('database', {})
+            
+            # 接続パラメータ
+            conn_params = {
+                'host': db_config.get('host', 'localhost'),
+                'port': db_config.get('port', 5432),
+                'database': db_config.get('database', 'archive_system'),
+                'user': db_config.get('user', 'postgres'),
+                'password': db_config.get('password', ''),
+                'connect_timeout': db_config.get('timeout', 30)
+            }
+            
+            self.logger.info(f"データベース接続: {conn_params['host']}:{conn_params['port']}/{conn_params['database']}")
+            
+            # 接続実行
+            conn = psycopg2.connect(**conn_params)
+            
+            # 自動コミットを無効化（トランザクション管理のため）
+            conn.autocommit = False
+            
+            # 接続テスト
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            
+            self.logger.info("データベース接続成功")
+            return conn
+            
+        except ImportError:
+            raise Exception("psycopg2がインストールされていません。pip install psycopg2-binary を実行してください。")
+        except Exception as e:
+            raise Exception(f"データベース接続失敗: {str(e)}")
         
     def generate_csv_error_file(self, original_csv_path: str) -> Optional[str]:
         """CSV検証エラー用のエラーファイル生成（再試行用フォーマット）"""
