@@ -285,8 +285,11 @@ class ArchiveProcessor:
             
             # 設定値の取得
             bucket_name = self.config['aws']['s3_bucket']
-            storage_class = self.config['aws'].get('storage_class', 'GLACIER_DEEP_ARCHIVE')
+            storage_class = self.config['aws'].get('storage_class', 'STANDARD')
             max_retries = self.config['processing'].get('retry_count', 3)
+            
+            # ストレージクラスの検証・調整
+            storage_class = self._validate_storage_class(storage_class)
             
             self.logger.info(f"S3バケット: {bucket_name}")
             self.logger.info(f"ストレージクラス: {storage_class}")
@@ -352,16 +355,48 @@ class ArchiveProcessor:
                 for f in files
             ]
     
+    def _validate_storage_class(self, storage_class: str) -> str:
+        """ストレージクラスの検証と調整"""
+        # 有効なストレージクラスのリスト（優先順位順）
+        valid_classes = [
+            'STANDARD',
+            'STANDARD_IA', 
+            'GLACIER',
+            'DEEP_ARCHIVE',
+            'GLACIER_DEEP_ARCHIVE'  # 互換性のため残す
+        ]
+        
+        # GLACIER_DEEP_ARCHIVE -> DEEP_ARCHIVE の自動変換
+        if storage_class == 'GLACIER_DEEP_ARCHIVE':
+            self.logger.info(f"'{storage_class}' を 'DEEP_ARCHIVE' に自動変換")
+            return 'DEEP_ARCHIVE'
+        
+        # 設定値をそのまま試す
+        if storage_class in valid_classes:
+            self.logger.info(f"ストレージクラス '{storage_class}' を使用")
+            return storage_class
+        
+        # フォールバック: STANDARDを使用
+        self.logger.warning(f"無効なストレージクラス '{storage_class}' のため 'STANDARD' に変更")
+        return 'STANDARD'
+    
     def _initialize_s3_client(self):
         """S3クライアントの初期化"""
         try:
             import boto3
             from botocore.config import Config
             
-            # AWS設定の取得
+            # AWS設定の取得（スペース除去）
             aws_config = self.config.get('aws', {})
-            region = aws_config.get('region', 'ap-northeast-1')
-            vpc_endpoint_url = aws_config.get('vpc_endpoint_url')
+            region = aws_config.get('region', 'ap-northeast-1').strip()
+            bucket_name = aws_config.get('s3_bucket', '').strip()
+            vpc_endpoint_url = aws_config.get('vpc_endpoint_url', '').strip()
+            
+            # バケット名の検証
+            if not bucket_name:
+                raise Exception("S3バケット名が設定されていません")
+            
+            self.logger.info(f"S3バケット名: '{bucket_name}'")  # デバッグ用に引用符で囲む
             
             # boto3設定
             config = Config(
@@ -381,7 +416,7 @@ class ArchiveProcessor:
                 s3_client = boto3.client('s3', config=config)
             
             # 接続テスト
-            self._test_s3_connection(s3_client, aws_config.get('s3_bucket'))
+            self._test_s3_connection(s3_client, bucket_name)
             
             return s3_client
             
@@ -395,9 +430,9 @@ class ArchiveProcessor:
         try:
             # バケットの存在確認
             response = s3_client.head_bucket(Bucket=bucket_name)
-            self.logger.info(f"S3バケット接続確認OK: {bucket_name}")
+            self.logger.info(f"S3バケット接続確認OK: '{bucket_name}'")
         except Exception as e:
-            raise Exception(f"S3バケット接続失敗: {bucket_name} - {str(e)}")
+            raise Exception(f"S3バケット接続失敗: '{bucket_name}' - {str(e)}")
     
     def _generate_s3_key(self, file_path: str) -> str:
         """ファイルパスからS3キーを生成"""

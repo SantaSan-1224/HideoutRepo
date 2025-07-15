@@ -190,7 +190,7 @@ C:\temp\file.txt,S3アップロード失敗,1024,C:\temp
   "aws": {
     "region": "ap-northeast-1",
     "s3_bucket": "your-archive-bucket",
-    "storage_class": "GLACIER_DEEP_ARCHIVE",
+    "storage_class": "DEEP_ARCHIVE",
     "vpc_endpoint_url": "https://..."
   },
   "database": {

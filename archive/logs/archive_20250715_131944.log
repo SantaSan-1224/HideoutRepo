@@ -1,0 +1,31 @@
+2025-07-15 13:19:44,075 - archive_processor - INFO - ログファイル: logs\archive_20250715_131944.log
+2025-07-15 13:19:44,075 - archive_processor - INFO - アーカイブ処理開始 - Request ID: REQ-2025-001
+2025-07-15 13:19:44,077 - archive_processor - INFO - CSVファイルの読み込み開始: test_directories.csv
+2025-07-15 13:19:44,079 - archive_processor - INFO - 読み込み行数: 2
+2025-07-15 13:19:44,079 - archive_processor - INFO - 行 1: ヘッダー行をスキップ
+2025-07-15 13:19:44,079 - archive_processor - INFO - 行 2: パス検証中 - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com... (全長: 65文字)
+2025-07-15 13:19:44,081 - archive_processor - INFO - 行 2: 有効なパス追加 ✓
+2025-07-15 13:19:44,082 - archive_processor - INFO - CSV読み込み完了
+2025-07-15 13:19:44,082 - archive_processor - INFO -   - 有効ディレクトリ数: 1
+2025-07-15 13:19:44,082 - archive_processor - INFO -   - エラー項目数: 0
+2025-07-15 13:19:44,083 - archive_processor - INFO - ファイル収集開始
+2025-07-15 13:19:44,083 - archive_processor - INFO - ディレクトリ処理開始: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...
+2025-07-15 13:19:44,095 - archive_processor - INFO - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...: 11個のファイルを収集
+2025-07-15 13:19:44,099 - archive_processor - INFO - ファイル収集完了 - 総ファイル数: 11
+2025-07-15 13:19:44,100 - archive_processor - INFO - S3アップロード開始
+2025-07-15 13:19:45,137 - archive_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-07-15 13:19:46,465 - archive_processor - ERROR - S3アップロード処理でエラーが発生: S3クライアント初期化失敗: S3バケット接続失敗: s3-rdfs-qa-fsgw-002-891612560424  - Parameter validation failed:
+Invalid bucket name "s3-rdfs-qa-fsgw-002-891612560424 ": Bucket name must match the regex "^[a-zA-Z0-9.\-_]{1,255}$" or be an ARN matching the regex "^arn:(aws).*:(s3|s3-object-lambda):[a-z\-0-9]*:[0-9]{12}:accesspoint[/:][a-zA-Z0-9\-.]{1,63}$|^arn:(aws).*:s3-outposts:[a-z\-0-9]+:[0-9]{12}:outpost[/:][a-zA-Z0-9\-]{1,63}[/:]accesspoint[/:][a-zA-Z0-9\-]{1,63}$"
+2025-07-15 13:19:46,468 - archive_processor - INFO - アーカイブ後処理開始
+2025-07-15 13:19:46,469 - archive_processor - INFO - アーカイブ後処理完了
+2025-07-15 13:19:46,469 - archive_processor - INFO - データベース登録開始
+2025-07-15 13:19:46,470 - archive_processor - INFO - データベース登録完了
+2025-07-15 13:19:46,470 - archive_processor - WARNING - アーカイブエラーが発生したファイルがあります: error_output.csv
+2025-07-15 13:19:46,471 - archive_processor - INFO - アーカイブ処理完了
+2025-07-15 13:19:46,471 - archive_processor - INFO - === 処理統計 ===
+2025-07-15 13:19:46,472 - archive_processor - INFO - 処理時間: 0:00:02.395995
+2025-07-15 13:19:46,472 - archive_processor - INFO - CSV検証エラー数: 0
+2025-07-15 13:19:46,472 - archive_processor - INFO - 総ファイル数: 11
+2025-07-15 13:19:46,473 - archive_processor - INFO - 成功ファイル数: 0
+2025-07-15 13:19:46,473 - archive_processor - INFO - 失敗ファイル数: 11
+2025-07-15 13:19:46,473 - archive_processor - INFO - 総ファイルサイズ: 0 bytes
