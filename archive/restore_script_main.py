@@ -152,33 +152,34 @@ class RestoreProcessor:
                         error_item = {
                             'line_number': line_num,
                             'content': clean_line,
-                            'error_reason': 'カラム数が不足しています（S3パス, 復元先ディレクトリが必要）',
+                            'error_reason': 'カラム数が不足しています（元ファイルパス, 復元先ディレクトリが必要）',
                             'original_line': line.rstrip()
                         }
                         self.csv_errors.append(error_item)
                         self.logger.error(f"行 {line_num}: カラム数不足 ✗")
                         continue
                     
-                    s3_path = row[0].strip()
+                    original_file_path = row[0].strip()
                     restore_dir = row[1].strip()
                     
                     # 復元依頼の検証
-                    validation_result = self._validate_restore_request(s3_path, restore_dir)
+                    validation_result = self._validate_restore_request(original_file_path, restore_dir)
                     
                     if validation_result['valid']:
                         request_item = {
                             'line_number': line_num,
-                            's3_path': s3_path,
+                            'original_file_path': original_file_path,
                             'restore_directory': restore_dir,
-                            'bucket': self._extract_bucket_from_s3_path(s3_path),
-                            'key': self._extract_key_from_s3_path(s3_path)
+                            's3_path': None,  # データベース検索で取得
+                            'bucket': None,   # S3パス取得後に設定
+                            'key': None       # S3パス取得後に設定
                         }
                         valid_requests.append(request_item)
                         self.logger.info(f"行 {line_num}: 有効な復元依頼追加 ✓")
                     else:
                         error_item = {
                             'line_number': line_num,
-                            'content': f"{s3_path} -> {restore_dir}",
+                            'content': f"{original_file_path} -> {restore_dir}",
                             'error_reason': validation_result['error_reason'],
                             'original_line': line.rstrip()
                         }
@@ -205,16 +206,16 @@ class RestoreProcessor:
         
         return valid_requests, self.csv_errors
     
-    def _validate_restore_request(self, s3_path: str, restore_dir: str) -> Dict:
+    def _validate_restore_request(self, original_file_path: str, restore_dir: str) -> Dict:
         """復元依頼の検証"""
         try:
-            # S3パスの形式チェック
-            if not s3_path.startswith('s3://'):
-                return {'valid': False, 'error_reason': 'S3パスはs3://で始まる必要があります'}
+            # 元ファイルパスの形式チェック
+            if not original_file_path:
+                return {'valid': False, 'error_reason': '元ファイルパスが指定されていません'}
             
-            # S3パスの構成要素チェック
-            if s3_path.count('/') < 3:  # s3://bucket/key最低限
-                return {'valid': False, 'error_reason': 'S3パスの形式が正しくありません'}
+            # パス長制限チェック
+            if len(original_file_path) > 260:
+                return {'valid': False, 'error_reason': 'ファイルパスが長すぎます（260文字制限）'}
             
             # 復元先ディレクトリの検証
             if not restore_dir:
@@ -235,6 +236,93 @@ class RestoreProcessor:
             
         except Exception as e:
             return {'valid': False, 'error_reason': f'検証エラー: {str(e)}'}
+    
+    def lookup_s3_paths_from_database(self, restore_requests: List[Dict]) -> List[Dict]:
+        """データベースから元ファイルパスに対応するS3パスを検索"""
+        self.logger.info("データベースからS3パス検索開始")
+        
+        try:
+            # データベース接続
+            conn = self._connect_database()
+            
+            with conn:
+                with conn.cursor() as cursor:
+                    for request in restore_requests:
+                        original_path = request['original_file_path']
+                        
+                        # S3パス検索
+                        cursor.execute(
+                            "SELECT s3_path, archive_date FROM archive_history WHERE original_file_path = %s",
+                            (original_path,)
+                        )
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            s3_path, archive_date = result
+                            request['s3_path'] = s3_path
+                            request['bucket'] = self._extract_bucket_from_s3_path(s3_path)
+                            request['key'] = self._extract_key_from_s3_path(s3_path)
+                            request['archive_date'] = str(archive_date)
+                            self.logger.info(f"S3パス見つかりました: {original_path} -> {s3_path}")
+                        else:
+                            request['s3_path'] = None
+                            request['error'] = 'データベースにアーカイブ履歴が見つかりません'
+                            self.logger.error(f"S3パス見つからず: {original_path}")
+            
+            self.logger.info("データベースS3パス検索完了")
+            return restore_requests
+            
+        except Exception as e:
+            self.logger.error(f"データベース検索エラー: {str(e)}")
+            # エラー時は全リクエストにエラーマーク
+            for request in restore_requests:
+                request['s3_path'] = None
+                request['error'] = f'データベース接続エラー: {str(e)}'
+            return restore_requests
+        
+        finally:
+            try:
+                if 'conn' in locals():
+                    conn.close()
+            except Exception:
+                pass
+    
+    def _connect_database(self):
+        """データベース接続（アーカイブスクリプトと共通）"""
+        try:
+            import psycopg2
+            
+            # データベース設定取得
+            db_config = self.config.get('database', {})
+            
+            # 接続パラメータ
+            conn_params = {
+                'host': db_config.get('host', 'localhost'),
+                'port': db_config.get('port', 5432),
+                'database': db_config.get('database', 'archive_system'),
+                'user': db_config.get('user', 'postgres'),
+                'password': db_config.get('password', ''),
+                'connect_timeout': db_config.get('timeout', 30)
+            }
+            
+            self.logger.info(f"データベース接続: {conn_params['host']}:{conn_params['port']}/{conn_params['database']}")
+            
+            # 接続実行
+            conn = psycopg2.connect(**conn_params)
+            conn.autocommit = False
+            
+            # 接続テスト
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            
+            self.logger.info("データベース接続成功")
+            return conn
+            
+        except ImportError:
+            raise Exception("psycopg2がインストールされていません。pip install psycopg2-binary を実行してください。")
+        except Exception as e:
+            raise Exception(f"データベース接続失敗: {str(e)}")
     
     def _extract_bucket_from_s3_path(self, s3_path: str) -> str:
         """S3パスからバケット名を抽出"""
@@ -374,13 +462,32 @@ class RestoreProcessor:
             
         self.stats['total_files'] = len(restore_requests)
         
-        # 2. S3復元リクエスト送信
-        restore_requests = self.request_restore(restore_requests)
+        # 2. データベースからS3パス検索
+        restore_requests = self.lookup_s3_paths_from_database(restore_requests)
         
-        # 3. ステータスファイル保存
-        self._save_restore_status(restore_requests)
+        # S3パスが見つからないファイルをフィルタリング
+        valid_restore_requests = [req for req in restore_requests if req.get('s3_path')]
+        failed_requests = [req for req in restore_requests if not req.get('s3_path')]
+        
+        if failed_requests:
+            self.logger.warning(f"S3パスが見つからないファイル: {len(failed_requests)}件")
+            for req in failed_requests:
+                self.logger.warning(f"  - {req['original_file_path']}: {req.get('error', '不明')}")
+        
+        if not valid_restore_requests:
+            self.logger.error("復元可能なファイルが見つかりません")
+            return 1
+        
+        # 3. S3復元リクエスト送信
+        restore_requests = self.request_restore(valid_restore_requests)
+        
+        # 4. ステータスファイル保存（失敗分も含む）
+        all_requests = valid_restore_requests + failed_requests
+        self._save_restore_status(all_requests)
         
         self.logger.info(f"復元リクエスト送信完了 - {self.stats['restore_requested']}件")
+        if failed_requests:
+            self.logger.warning(f"復元不可ファイル - {len(failed_requests)}件")
         self.logger.info("48時間後にダウンロード処理を実行してください:")
         self.logger.info(f"python restore_script_main.py {csv_path} {self.request_id} --download-only")
         
