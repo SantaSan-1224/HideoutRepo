@@ -491,26 +491,246 @@ WHERE request_date BETWEEN %s AND %s;
 
 ### 5.1 復元処理フロー
 
-```
-1. 復元依頼CSV読み込み
-2. S3復元リクエスト送信
-3. 復元完了待機
-4. ファイルダウンロード
-5. 指定ディレクトリに配置
-6. 処理結果ログ出力
+```mermaid
+flowchart TD
+    Start([復元処理開始]) --> Mode{実行モード}
+
+    %% 復元リクエスト送信モード
+    Mode -->|--request-only| CSV_Read[📄 復元依頼CSV読み込み<br/>元ファイルパス検証]
+    CSV_Read --> DB_Search[🗄️ データベース検索<br/>S3パス取得]
+    DB_Search --> S3_Request[☁️ S3復元リクエスト送信<br/>Glacier Deep Archive]
+    S3_Request --> Status_Save[💾 復元ステータス保存<br/>JSON形式]
+    Status_Save --> Request_End([48時間後ダウンロード実行案内])
+
+    %% ダウンロード実行モード（ステータス確認込み）
+    Mode -->|--download-only| Status_Load[📂 復元ステータス読み込み<br/>JSON形式]
+    Status_Load --> S3_Check[☁️ S3復元ステータス確認<br/>head_object API]
+    S3_Check --> Status_Filter{復元完了<br/>ファイル？}
+    Status_Filter -->|あり| S3_Download[⬇️ S3からダウンロード<br/>復元完了ファイルのみ]
+    Status_Filter -->|なし| Wait_Message[⏰ 復元処理中メッセージ<br/>再実行案内]
+    S3_Download --> File_Place[📁 ファイル配置<br/>指定ディレクトリ]
+    File_Place --> Download_End([復元処理完了])
+    Wait_Message --> Download_End
+
+    %% スタイル
+    classDef modeBox fill:#E3F2FD,stroke:#1976D2,stroke-width:2px
+    classDef processBox fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px
+    classDef decisionBox fill:#FFF3E0,stroke:#F57C00,stroke-width:2px
+    classDef endBox fill:#E8F5E8,stroke:#4CAF50,stroke-width:2px
+
+    class Mode modeBox
+    class Status_Filter decisionBox
+    class CSV_Read,DB_Search,S3_Request,Status_Save,Status_Load,S3_Check,S3_Download,File_Place processBox
+    class Request_End,Download_End,Wait_Message endBox
 ```
 
 ### 5.2 復元 CSV 仕様
 
+#### 5.2.1 入力 CSV フォーマット
+
 ```csv
-復元対象パス,復元先ディレクトリ
-archive/path/to/file.txt,C:\restored\files\
-archive/path/to/file2.txt,C:\restored\files\
+元ファイルパス,復元先ディレクトリ
+\\server\share\project1\file.txt,C:\restored\files\
+\\server\share\project2\data.xlsx,D:\backup\restore\
+\\server\share\archive\document.pdf,\\fileserver\shared\restored\
 ```
+
+**項目説明**:
+
+- **元ファイルパス**: アーカイブ時の original_file_path（データベース検索キー）
+- **復元先ディレクトリ**: ファイルを復元する先のディレクトリパス
+
+#### 5.2.2 CSV 検証項目
+
+- 元ファイルパスの存在性（データベース内）
+- 復元先ディレクトリの存在・書き込み権限
+- パス長制限（260 文字）
+- CSV フォーマット妥当性
 
 ### 5.3 復元処理詳細設計
 
-**TODO**: 復元スクリプトの詳細設計（後続で実装）
+#### 5.3.1 RestoreProcessor クラス
+
+**責務**: 復元処理の全体制御
+
+**主要メソッド**:
+
+```python
+class RestoreProcessor:
+    def __init__(config_path: str)
+    def load_config(config_path: str) -> Dict
+    def setup_logger() -> logging.Logger
+    def validate_csv_input(csv_path: str) -> Tuple[List[Dict], List[Dict]]
+    def _validate_restore_request(original_file_path: str, restore_dir: str) -> Dict
+    def lookup_s3_paths_from_database(restore_requests: List[Dict]) -> List[Dict]
+    def request_restore(restore_requests: List[Dict]) -> List[Dict]
+    def check_restore_completion(restore_requests: List[Dict]) -> List[Dict]
+    def download_and_place_files(restore_requests: List[Dict]) -> List[Dict]
+    def _save_restore_status(restore_requests: List[Dict]) -> None
+    def _load_restore_status() -> List[Dict]
+    def run(csv_path: str, request_id: str, mode: str) -> int
+```
+
+#### 5.3.2 実行モード設計
+
+**1. 復元リクエスト送信モード** (`--request-only`)
+
+```
+1. CSV読み込み・検証
+2. データベースからS3パス検索
+3. S3復元リクエスト送信
+4. 復元ステータスファイル保存
+```
+
+**2. ダウンロード実行モード** (`--download-only`)
+
+```
+1. 復元ステータスファイル読み込み
+2. S3復元ステータス確認（自動実行）
+3. 復元完了ファイルのフィルタリング
+4. 復元完了ファイルのダウンロード・配置
+5. ステータスファイル更新
+```
+
+**運用上の特徴**:
+
+- ダウンロード実行時に復元ステータス確認も自動実行
+- 復元未完了ファイルがある場合、完了分のみ処理して未完了分は次回に持ち越し
+- シンプルな 2 段階実行フロー
+
+#### 5.3.3 復元ステータス管理
+
+**ステータスファイル**: `logs/restore_status_{request_id}.json`
+
+```json
+{
+  "request_id": "REQ-2025-001",
+  "request_date": "2025-07-15T10:30:00",
+  "total_requests": 10,
+  "restore_requests": [
+    {
+      "line_number": 2,
+      "original_file_path": "\\\\server\\share\\file.txt",
+      "restore_directory": "C:\\restored\\",
+      "s3_path": "s3://bucket/server/share/file.txt",
+      "bucket": "bucket",
+      "key": "server/share/file.txt",
+      "restore_status": "completed",
+      "restore_request_time": "2025-07-15T10:30:15",
+      "restore_completed_time": "2025-07-17T14:20:00",
+      "restore_expiry": "Fri, 22 Jul 2025 14:20:00 GMT"
+    }
+  ]
+}
+```
+
+**ステータス値**:
+
+- `requested`: 復元リクエスト送信済み
+- `already_in_progress`: 既に復元処理中
+- `pending`: 復元処理待機中
+- `in_progress`: 復元処理中
+- `completed`: 復元完了（ダウンロード可能）
+- `failed`: 復元失敗
+- `downloaded`: ダウンロード完了
+
+#### 5.3.4 S3 復元ステータス確認
+
+**API**: `s3_client.head_object(Bucket, Key)`
+
+**Restore ヘッダー解析**:
+
+```python
+# 復元処理中
+'ongoing-request="true"'
+
+# 復元完了
+'ongoing-request="false", expiry-date="Fri, 21 Dec 2012 00:00:00 GMT"'
+
+# 復元未開始
+None (Restoreヘッダーなし)
+```
+
+#### 5.3.5 復元設定項目
+
+```json
+{
+  "restore": {
+    "restore_tier": "Standard", // Standard/Expedited/Bulk
+    "restore_days": 7, // 復元後保持日数
+    "check_interval": 300, // ステータス確認間隔（秒）
+    "max_wait_time": 86400, // 最大待機時間（秒）
+    "download_retry_count": 3, // ダウンロードリトライ回数
+    "skip_existing_files": true, // 同名ファイルスキップ
+    "temp_download_directory": "temp_downloads" // 一時ダウンロード先
+  }
+}
+```
+
+### 5.4 復元処理運用手順
+
+#### 5.4.1 標準的な復元フロー（2 段階実行）
+
+```bash
+# 1. 復元リクエスト送信（即座に完了）
+python restore_script_main.py restore_request.csv REQ-2025-001 --request-only
+
+# 2. 48時間後、ダウンロード実行（ステータス確認も自動実行）
+python restore_script_main.py restore_request.csv REQ-2025-001 --download-only
+```
+
+#### 5.4.2 復元進捗の確認方法
+
+**ステータスファイルで確認**:
+
+```bash
+# ステータスファイルの内容確認
+cat logs/restore_status_REQ-2025-001.json
+```
+
+**ログファイルで確認**:
+
+```bash
+# 最新のログファイル確認
+tail -f logs/restore_YYYYMMDD_HHMMSS.log
+```
+
+#### 5.4.3 部分的な復元完了時の動作
+
+- 一部ファイルが復元完了、一部が処理中の場合
+- `--download-only`実行時に完了分のみダウンロード
+- 未完了分は次回実行時に自動的に確認・ダウンロード
+
+```bash
+# 例：10ファイル中5ファイルが復元完了の場合
+python restore_script_main.py restore_request.csv REQ-2025-001 --download-only
+# → 5ファイルがダウンロードされ、残り5ファイルは次回に持ち越し
+
+# 翌日再実行（残り5ファイルの確認・ダウンロード）
+python restore_script_main.py restore_request.csv REQ-2025-001 --download-only
+```
+
+#### 5.4.2 エラー対応
+
+**CSV 検証エラー**:
+
+- `logs/{filename}_restore_errors_{timestamp}.csv` に詳細出力
+- 修正後に再実行
+
+**復元リクエストエラー**:
+
+- ログでエラー理由確認
+- IAM 権限・S3 接続確認
+
+**ダウンロードエラー**:
+
+- 復元期限切れの場合は再度リクエスト送信
+- 権限エラーの場合は復元先ディレクトリ確認
+
+**復元未完了の場合**:
+
+- `--download-only`実行時に「復元処理中」メッセージが表示
+- しばらく待ってから再実行（完了分のみ自動ダウンロード）
 
 ## 6. 運用・監視設計
 

@@ -668,8 +668,7 @@ class RestoreProcessor:
             request_id: 復元依頼ID
             mode: 実行モード
                 - 'request': 復元リクエスト送信のみ
-                - 'download': ダウンロード実行のみ
-                - 'check': 復元ステータス確認のみ
+                - 'download': 復元ステータス確認 + ダウンロード実行
         """
         self.stats['start_time'] = datetime.datetime.now()
         self.request_id = request_id
@@ -681,8 +680,6 @@ class RestoreProcessor:
                 return self._run_restore_request(csv_path)
             elif mode == 'download':
                 return self._run_download_files(csv_path)
-            elif mode == 'check':
-                return self._run_check_status(csv_path)
             else:
                 self.logger.error(f"無効なモード: {mode}")
                 return 1
@@ -739,35 +736,13 @@ class RestoreProcessor:
         self.logger.info(f"復元リクエスト送信完了 - {self.stats['restore_requested']}件")
         if failed_requests:
             self.logger.warning(f"復元不可ファイル - {len(failed_requests)}件")
-        self.logger.info("48時間後に復元ステータスを確認してください:")
-        self.logger.info(f"python restore_script_main.py {csv_path} {self.request_id} --check-only")
+        self.logger.info("48時間後にダウンロード処理を実行してください:")
+        self.logger.info(f"python restore_script_main.py {csv_path} {self.request_id} --download-only")
         
-        return 0
-    
-    def _run_check_status(self, csv_path: str) -> int:
-        """復元ステータス確認処理"""
-        self.logger.info("=== 復元ステータス確認モード ===")
-        
-        # 1. ステータスファイル読み込み
-        restore_requests = self._load_restore_status()
-        if not restore_requests:
-            self.logger.error("復元ステータスファイルが見つかりません")
-            self.logger.error("先に復元リクエスト送信を実行してください")
-            return 1
-        
-        self.stats['total_files'] = len(restore_requests)
-        
-        # 2. 復元完了確認
-        restore_requests = self.check_restore_completion(restore_requests)
-        
-        # 3. ステータスファイル更新
-        self._save_restore_status(restore_requests)
-        
-        self.logger.info(f"復元ステータス確認完了")
         return 0
     
     def _run_download_files(self, csv_path: str) -> int:
-        """ダウンロード実行処理"""
+        """ダウンロード実行処理（復元ステータス確認込み）"""
         self.logger.info("=== ダウンロード実行モード ===")
         
         # 1. ステータスファイル読み込み
@@ -780,15 +755,42 @@ class RestoreProcessor:
         self.stats['total_files'] = len(restore_requests)
         
         # 2. 復元完了確認（最新ステータス取得）
+        self.logger.info("復元ステータスを確認しています...")
         restore_requests = self.check_restore_completion(restore_requests)
         
-        # 3. ファイルダウンロード・配置
+        # 3. 復元完了ファイルのフィルタリング
+        completed_requests = [req for req in restore_requests 
+                             if req.get('restore_status') == 'completed']
+        
+        if not completed_requests:
+            self.logger.info("復元完了ファイルがありません")
+            pending_count = len([req for req in restore_requests 
+                               if req.get('restore_status') in ['pending', 'in_progress']])
+            if pending_count > 0:
+                self.logger.info(f"復元処理中のファイル: {pending_count}件")
+                self.logger.info("しばらく待ってから再度実行してください")
+            return 0
+        
+        self.logger.info(f"復元完了ファイル: {len(completed_requests)}件をダウンロードします")
+        
+        # 4. ファイルダウンロード・配置
         restore_requests = self.download_and_place_files(restore_requests)
         
-        # 4. ステータスファイル更新
+        # 5. ステータスファイル更新
         self._save_restore_status(restore_requests)
         
-        self.logger.info(f"ダウンロード処理完了 - {self.stats['restore_completed']}件")
+        downloaded_count = len([req for req in restore_requests 
+                              if req.get('download_status') == 'completed'])
+        
+        self.logger.info(f"ダウンロード処理完了 - {downloaded_count}件")
+        
+        # 未完了ファイルがある場合の案内
+        remaining_count = len([req for req in restore_requests 
+                             if req.get('restore_status') in ['pending', 'in_progress']])
+        if remaining_count > 0:
+            self.logger.info(f"復元処理中のファイル: {remaining_count}件")
+            self.logger.info("復元完了後に再度ダウンロード処理を実行してください")
+        
         return 0
     
     def _save_restore_status(self, restore_requests: List[Dict]) -> None:
@@ -851,10 +853,8 @@ def main():
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument('--request-only', action='store_true',
                            help='復元リクエスト送信のみ実行')
-    mode_group.add_argument('--check-only', action='store_true',
-                           help='復元ステータス確認のみ実行')
     mode_group.add_argument('--download-only', action='store_true',
-                           help='ダウンロード実行のみ実行')
+                           help='復元ステータス確認 + ダウンロード実行')
     
     args = parser.parse_args()
     
@@ -866,13 +866,11 @@ def main():
     # 実行モード決定
     if args.request_only:
         mode = 'request'
-    elif args.check_only:
-        mode = 'check'
     elif args.download_only:
         mode = 'download'
     else:
         # このケースは発生しないはず（mutually_exclusive_group + required=True）
-        print("実行モードを指定してください: --request-only, --check-only, または --download-only")
+        print("実行モードを指定してください: --request-only または --download-only")
         sys.exit(1)
         
     # 復元処理の実行
