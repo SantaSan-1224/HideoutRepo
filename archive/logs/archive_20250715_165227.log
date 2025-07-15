@@ -1,0 +1,55 @@
+2025-07-15 16:52:27,983 - archive_processor - INFO - ログファイル: logs\archive_20250715_165227.log
+2025-07-15 16:52:27,984 - archive_processor - INFO - アーカイブ処理開始 - Request ID: REQ-2025-001
+2025-07-15 16:52:27,986 - archive_processor - INFO - CSVファイルの読み込み開始: test_directories.csv
+2025-07-15 16:52:27,988 - archive_processor - INFO - 読み込み行数: 2
+2025-07-15 16:52:27,988 - archive_processor - INFO - 行 1: ヘッダー行をスキップ
+2025-07-15 16:52:27,989 - archive_processor - INFO - 行 2: パス検証中 - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...
+2025-07-15 16:52:27,990 - archive_processor - INFO - 行 2: 有効なパス追加 ✓
+2025-07-15 16:52:27,991 - archive_processor - INFO - CSV読み込み完了
+2025-07-15 16:52:27,992 - archive_processor - INFO -   - 有効ディレクトリ数: 1
+2025-07-15 16:52:27,992 - archive_processor - INFO -   - エラー項目数: 0
+2025-07-15 16:52:27,993 - archive_processor - INFO - ファイル収集開始
+2025-07-15 16:52:27,994 - archive_processor - INFO - ディレクトリ処理開始: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...
+2025-07-15 16:52:27,999 - archive_processor - INFO - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...: 2個のファイルを収集
+2025-07-15 16:52:27,999 - archive_processor - INFO - ファイル収集完了 - 総ファイル数: 2
+2025-07-15 16:52:28,000 - archive_processor - INFO - S3アップロード開始
+2025-07-15 16:52:28,348 - archive_processor - INFO - S3バケット名: 's3-rdfs-qa-fsgw-002-891612560424'
+2025-07-15 16:52:28,349 - archive_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-07-15 16:52:28,968 - archive_processor - INFO - S3バケット接続確認OK: 's3-rdfs-qa-fsgw-002-891612560424'
+2025-07-15 16:52:28,968 - archive_processor - INFO - ストレージクラス 'DEEP_ARCHIVE' を使用
+2025-07-15 16:52:28,970 - archive_processor - INFO - S3バケット: s3-rdfs-qa-fsgw-002-891612560424
+2025-07-15 16:52:28,971 - archive_processor - INFO - ストレージクラス: DEEP_ARCHIVE
+2025-07-15 16:52:28,971 - archive_processor - INFO - 処理対象ファイル数: 2
+2025-07-15 16:52:28,972 - archive_processor - INFO - [1/2] アップロード中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt (0 bytes)
+2025-07-15 16:52:29,019 - archive_processor - INFO - ✓ アップロード成功: amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt
+2025-07-15 16:52:29,019 - archive_processor - INFO - [2/2] アップロード中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt (0 bytes)
+2025-07-15 16:52:29,086 - archive_processor - INFO - ✓ アップロード成功: amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/山田太郎}.txt
+2025-07-15 16:52:29,086 - archive_processor - INFO - S3アップロード完了
+2025-07-15 16:52:29,089 - archive_processor - INFO -   - 成功: 2件
+2025-07-15 16:52:29,089 - archive_processor - INFO -   - 失敗: 0件
+2025-07-15 16:52:29,092 - archive_processor - INFO - アーカイブ後処理開始
+2025-07-15 16:52:29,092 - archive_processor - INFO - アーカイブ後処理対象: 2件
+2025-07-15 16:52:29,092 - archive_processor - INFO - 空ファイル作成: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt_archived
+2025-07-15 16:52:29,095 - archive_processor - INFO - 元ファイル削除: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt
+2025-07-15 16:52:29,098 - archive_processor - INFO - ✓ アーカイブ後処理完了: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt
+2025-07-15 16:52:29,099 - archive_processor - INFO - 空ファイル作成: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt_archived
+2025-07-15 16:52:29,101 - archive_processor - INFO - 元ファイル削除: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt
+2025-07-15 16:52:29,108 - archive_processor - INFO - ✓ アーカイブ後処理完了: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt
+2025-07-15 16:52:29,109 - archive_processor - INFO - アーカイブ後処理完了
+2025-07-15 16:52:29,109 - archive_processor - INFO -   - 完了: 2件
+2025-07-15 16:52:29,110 - archive_processor - INFO -   - 失敗: 0件
+2025-07-15 16:52:29,110 - archive_processor - INFO - データベース登録開始
+2025-07-15 16:52:29,111 - archive_processor - INFO - データベース登録対象: 2件
+2025-07-15 16:52:29,357 - archive_processor - INFO - データベース接続: localhost:5432/archive_system
+2025-07-15 16:52:29,446 - archive_processor - INFO - データベース接続成功
+2025-07-15 16:52:29,450 - archive_processor - ERROR - データベース登録エラー: 値は型character varying(7)としては長すぎます
+
+2025-07-15 16:52:29,450 - archive_processor - INFO - 全てのファイルが正常にアーカイブされました
+2025-07-15 16:52:29,451 - archive_processor - INFO - アーカイブ処理完了
+2025-07-15 16:52:29,451 - archive_processor - INFO - === 処理統計 ===
+2025-07-15 16:52:29,452 - archive_processor - INFO - 処理時間: 0:00:01.467748
+2025-07-15 16:52:29,452 - archive_processor - INFO - CSV検証エラー数: 0
+2025-07-15 16:52:29,453 - archive_processor - INFO - 総ファイル数: 2
+2025-07-15 16:52:29,453 - archive_processor - INFO - 成功ファイル数: 2
+2025-07-15 16:52:29,453 - archive_processor - INFO - 失敗ファイル数: 0
+2025-07-15 16:52:29,454 - archive_processor - INFO - 総ファイルサイズ: 0 bytes
