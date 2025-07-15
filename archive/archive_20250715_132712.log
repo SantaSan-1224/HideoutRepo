@@ -1,0 +1,44 @@
+2025-07-15 13:27:12,054 - archive_processor - INFO - ログファイル: logs\archive_20250715_132712.log
+2025-07-15 13:27:12,054 - archive_processor - INFO - アーカイブ処理開始 - Request ID: REQ-2025-001
+2025-07-15 13:27:12,056 - archive_processor - INFO - CSVファイルの読み込み開始: test_directories.csv
+2025-07-15 13:27:12,058 - archive_processor - INFO - 読み込み行数: 2
+2025-07-15 13:27:12,058 - archive_processor - INFO - 行 1: ヘッダー行をスキップ
+2025-07-15 13:27:12,059 - archive_processor - INFO - 行 2: パス検証中 - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com... (全長: 65文字)
+2025-07-15 13:27:12,060 - archive_processor - INFO - 行 2: 有効なパス追加 ✓
+2025-07-15 13:27:12,061 - archive_processor - INFO - CSV読み込み完了
+2025-07-15 13:27:12,061 - archive_processor - INFO -   - 有効ディレクトリ数: 1
+2025-07-15 13:27:12,062 - archive_processor - INFO -   - エラー項目数: 0
+2025-07-15 13:27:12,063 - archive_processor - INFO - ファイル収集開始
+2025-07-15 13:27:12,063 - archive_processor - INFO - ディレクトリ処理開始: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...
+2025-07-15 13:27:12,067 - archive_processor - INFO - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com...: 2個のファイルを収集
+2025-07-15 13:27:12,071 - archive_processor - INFO - ファイル収集完了 - 総ファイル数: 2
+2025-07-15 13:27:12,071 - archive_processor - INFO - S3アップロード開始
+2025-07-15 13:27:12,398 - archive_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-07-15 13:27:13,009 - archive_processor - INFO - S3バケット接続確認OK: s3-rdfs-qa-fsgw-002-891612560424
+2025-07-15 13:27:13,009 - archive_processor - INFO - S3バケット: s3-rdfs-qa-fsgw-002-891612560424
+2025-07-15 13:27:13,011 - archive_processor - INFO - ストレージクラス: GLACIER_DEEP_ARCHIVE
+2025-07-15 13:27:13,012 - archive_processor - INFO - 処理対象ファイル数: 2
+2025-07-15 13:27:13,012 - archive_processor - INFO - [1/2] アップロード中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt (0 bytes)
+2025-07-15 13:27:13,059 - archive_processor - WARNING - アップロード失敗 (試行 1/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt to s3-rdfs-qa-fsgw-002-891612560424/archive/share/project1/test.txt: An error occurred (InvalidStorageClass) when calling the PutObject operation: The storage class you specified is not valid
+2025-07-15 13:27:14,365 - archive_processor - WARNING - アップロード失敗 (試行 2/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt to s3-rdfs-qa-fsgw-002-891612560424/archive/share/project1/test.txt: An error occurred (InvalidStorageClass) when calling the PutObject operation: The storage class you specified is not valid
+2025-07-15 13:27:16,650 - archive_processor - ERROR - ✗ アップロード失敗: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt - 最大リトライ回数到達: Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt to s3-rdfs-qa-fsgw-002-891612560424/archive/share/project1/test.txt: An error occurred (InvalidStorageClass) when calling the PutObject operation: The storage class you specified is not valid
+2025-07-15 13:27:16,651 - archive_processor - INFO - [2/2] アップロード中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt (0 bytes)
+2025-07-15 13:27:16,927 - archive_processor - WARNING - アップロード失敗 (試行 1/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt to s3-rdfs-qa-fsgw-002-891612560424/archive/share/project1/山田太郎}.txt: An error occurred (InvalidStorageClass) when calling the PutObject operation: The storage class you specified is not valid
+2025-07-15 13:27:18,219 - archive_processor - WARNING - アップロード失敗 (試行 2/3): Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt to s3-rdfs-qa-fsgw-002-891612560424/archive/share/project1/山田太郎}.txt: An error occurred (InvalidStorageClass) when calling the PutObject operation: The storage class you specified is not valid
+2025-07-15 13:27:20,503 - archive_processor - ERROR - ✗ アップロード失敗: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt - 最大リトライ回数到達: Failed to upload \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\山田太郎}.txt to s3-rdfs-qa-fsgw-002-891612560424/archive/share/project1/山田太郎}.txt: An error occurred (InvalidStorageClass) when calling the PutObject operation: The storage class you specified is not valid
+2025-07-15 13:27:20,504 - archive_processor - INFO - S3アップロード完了
+2025-07-15 13:27:20,506 - archive_processor - INFO -   - 成功: 0件
+2025-07-15 13:27:20,507 - archive_processor - INFO -   - 失敗: 2件
+2025-07-15 13:27:20,507 - archive_processor - INFO - アーカイブ後処理開始
+2025-07-15 13:27:20,508 - archive_processor - INFO - アーカイブ後処理完了
+2025-07-15 13:27:20,508 - archive_processor - INFO - データベース登録開始
+2025-07-15 13:27:20,509 - archive_processor - INFO - データベース登録完了
+2025-07-15 13:27:20,509 - archive_processor - WARNING - アーカイブエラーが発生したファイルがあります: error_output.csv
+2025-07-15 13:27:20,510 - archive_processor - INFO - アーカイブ処理完了
+2025-07-15 13:27:20,510 - archive_processor - INFO - === 処理統計 ===
+2025-07-15 13:27:20,511 - archive_processor - INFO - 処理時間: 0:00:08.456306
+2025-07-15 13:27:20,511 - archive_processor - INFO - CSV検証エラー数: 0
+2025-07-15 13:27:20,512 - archive_processor - INFO - 総ファイル数: 2
+2025-07-15 13:27:20,512 - archive_processor - INFO - 成功ファイル数: 0
+2025-07-15 13:27:20,513 - archive_processor - INFO - 失敗ファイル数: 2
+2025-07-15 13:27:20,513 - archive_processor - INFO - 総ファイルサイズ: 0 bytes
