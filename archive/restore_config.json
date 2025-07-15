@@ -1,0 +1,39 @@
+{
+    "aws": {
+        "region": "ap-northeast-1",
+        "s3_bucket": "your-archive-bucket",
+        "storage_class": "GLACIER_DEEP_ARCHIVE",
+        "vpc_endpoint_url": "https://s3.ap-northeast-1.amazonaws.com"
+    },
+    "database": {
+        "host": "localhost",
+        "port": 5432,
+        "database": "archive_system",
+        "user": "postgres",
+        "password": "your_password",
+        "timeout": 30
+    },
+    "file_server": {
+        "base_path": "\\\\fileserver\\",
+        "archived_suffix": "_archived.txt",
+        "exclude_extensions": [".tmp", ".lock", ".bak"]
+    },
+    "processing": {
+        "max_file_size": 10737418240,
+        "chunk_size": 8388608,
+        "retry_count": 3
+    },
+    "logging": {
+        "log_directory": "logs",
+        "log_level": "INFO"
+    },
+    "restore": {
+        "restore_tier": "Standard",
+        "restore_days": 7,
+        "check_interval": 300,
+        "max_wait_time": 86400,
+        "download_retry_count": 3,
+        "skip_existing_files": true,
+        "temp_download_directory": "temp_downloads"
+    }
+}
