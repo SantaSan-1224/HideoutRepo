@@ -534,11 +534,87 @@ class ArchiveProcessor:
         return {'success': False, 'error': '不明なエラー'}
         
     def create_archived_files(self, results: List[Dict]) -> List[Dict]:
-        """アーカイブ後処理"""
+        """アーカイブ後処理（空ファイル作成→元ファイル削除）"""
         self.logger.info("アーカイブ後処理開始")
-        # TODO: 実装
+        
+        # 成功したファイルのみ処理
+        successful_results = [r for r in results if r.get('success', False)]
+        
+        if not successful_results:
+            self.logger.info("S3アップロード成功ファイルがないため、アーカイブ後処理をスキップ")
+            return results
+        
+        self.logger.info(f"アーカイブ後処理対象: {len(successful_results)}件")
+        
+        archived_suffix = self.config.get('file_server', {}).get('archived_suffix', '_archived')
+        processed_results = []
+        
+        for result in results:
+            if not result.get('success', False):
+                # 失敗したファイルはそのまま
+                processed_results.append(result)
+                continue
+            
+            file_path = result['file_path']
+            
+            try:
+                # 1. 空ファイル作成
+                archived_file_path = f"{file_path}{archived_suffix}"
+                
+                self.logger.info(f"空ファイル作成: {archived_file_path}")
+                
+                # 完全に空のファイル（0バイト）を作成
+                with open(archived_file_path, 'w') as f:
+                    pass  # 何も書かない（空ファイル）
+                
+                # 空ファイル作成確認
+                if not os.path.exists(archived_file_path):
+                    raise Exception("空ファイルの作成に失敗しました")
+                
+                # 2. 空ファイル作成成功後に元ファイル削除
+                self.logger.info(f"元ファイル削除: {file_path}")
+                
+                os.remove(file_path)
+                
+                # 元ファイル削除確認
+                if os.path.exists(file_path):
+                    raise Exception("元ファイルの削除に失敗しました")
+                
+                # 成功
+                result['archived_file_path'] = archived_file_path
+                result['archive_completed'] = True
+                self.logger.info(f"✓ アーカイブ後処理完了: {file_path}")
+                
+            except Exception as e:
+                # アーカイブ後処理失敗
+                error_msg = f"アーカイブ後処理失敗: {str(e)}"
+                self.logger.error(f"✗ {error_msg}: {file_path}")
+                
+                # 失敗時のクリーンアップ
+                try:
+                    # 作成済みの空ファイルがあれば削除
+                    if 'archived_file_path' in locals() and os.path.exists(archived_file_path):
+                        os.remove(archived_file_path)
+                        self.logger.info(f"作成済み空ファイルを削除: {archived_file_path}")
+                except Exception as cleanup_error:
+                    self.logger.warning(f"空ファイルクリーンアップ失敗: {cleanup_error}")
+                
+                # 結果を失敗に変更
+                result['success'] = False
+                result['error'] = error_msg
+                result['archive_completed'] = False
+            
+            processed_results.append(result)
+        
+        # 処理結果のサマリー
+        completed_count = len([r for r in processed_results if r.get('archive_completed', False)])
+        failed_count = len([r for r in processed_results if r.get('success', False) and not r.get('archive_completed', False)])
+        
         self.logger.info("アーカイブ後処理完了")
-        return results
+        self.logger.info(f"  - 完了: {completed_count}件")
+        self.logger.info(f"  - 失敗: {failed_count}件")
+        
+        return processed_results
         
     def save_to_database(self, results: List[Dict]) -> None:
         """データベース登録処理"""
