@@ -636,10 +636,14 @@ class ArchiveProcessor:
             # トランザクション開始
             with conn:
                 with conn.cursor() as cursor:
-                    # 設定から依頼情報を取得
+                    # 設定から依頼情報を取得（コマンドライン引数を優先）
                     request_config = self.config.get('request', {})
-                    request_id = request_config.get('request_id', 'UNKNOWN')
-                    requester = request_config.get('requester', '0000000')
+                    request_id = self.request_id  # コマンドライン引数を使用
+                    requester = request_config.get('requester', '00000000')
+                    
+                    # デバッグ用ログ追加
+                    self.logger.info(f"デバッグ: request_id='{request_id}' (長さ:{len(request_id)})")
+                    self.logger.info(f"デバッグ: requester='{requester}' (長さ:{len(requester)})")
                     
                     # 現在時刻
                     current_time = datetime.datetime.now()
@@ -865,6 +869,9 @@ class ArchiveProcessor:
     def run(self, csv_path: str, request_id: str) -> int:
         """メイン処理の実行"""
         self.stats['start_time'] = datetime.datetime.now()
+        
+        # request_idをインスタンス変数として保存
+        self.request_id = request_id
         
         try:
             self.logger.info(f"アーカイブ処理開始 - Request ID: {request_id}")
