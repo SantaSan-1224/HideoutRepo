@@ -1,0 +1,28 @@
+2025-07-15 18:29:21,298 - restore_processor - INFO - ログファイル: logs\restore_20250715_182921.log
+2025-07-15 18:29:21,298 - restore_processor - INFO - 復元処理開始 - Request ID: REQ-RESTORE-TEST-001, Mode: request
+2025-07-15 18:29:21,300 - restore_processor - INFO - === 復元リクエスト送信モード ===
+2025-07-15 18:29:21,301 - restore_processor - INFO - 復元依頼CSV読み込み開始: test_restore_request.csv
+2025-07-15 18:29:21,303 - restore_processor - INFO - 読み込み行数: 2
+2025-07-15 18:29:21,303 - restore_processor - INFO - 行 1: ヘッダー行をスキップ
+2025-07-15 18:29:21,305 - restore_processor - INFO - 行 2: 有効な復元依頼追加 ✓
+2025-07-15 18:29:21,305 - restore_processor - INFO - CSV読み込み完了
+2025-07-15 18:29:21,306 - restore_processor - INFO -   - 有効な復元依頼数: 1
+2025-07-15 18:29:21,306 - restore_processor - INFO -   - エラー項目数: 0
+2025-07-15 18:29:21,307 - restore_processor - INFO - データベースからS3パス検索開始
+2025-07-15 18:29:21,352 - restore_processor - INFO - データベース接続: localhost:5432/archive_system
+2025-07-15 18:29:21,415 - restore_processor - INFO - データベース接続成功
+2025-07-15 18:29:21,419 - restore_processor - INFO - S3パス見つかりました: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt -> s3://s3-rdfs-qa-fsgw-002-891612560424/amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com/share/project1/test.txt
+2025-07-15 18:29:21,420 - restore_processor - INFO - データベースS3パス検索完了
+2025-07-15 18:29:21,420 - restore_processor - INFO - S3復元リクエスト送信開始
+2025-07-15 18:29:21,421 - restore_processor - INFO - S3復元リクエスト送信完了
+2025-07-15 18:29:21,422 - restore_processor - INFO - 復元ステータス保存: logs\restore_status_REQ-RESTORE-TEST-001.json
+2025-07-15 18:29:21,422 - restore_processor - INFO - 復元リクエスト送信完了 - 0件
+2025-07-15 18:29:21,423 - restore_processor - INFO - 48時間後にダウンロード処理を実行してください:
+2025-07-15 18:29:21,423 - restore_processor - INFO - python restore_script_main.py test_restore_request.csv REQ-RESTORE-TEST-001 --download-only
+2025-07-15 18:29:21,424 - restore_processor - INFO - === 復元処理統計 ===
+2025-07-15 18:29:21,424 - restore_processor - INFO - 処理時間: 0:00:00.125149
+2025-07-15 18:29:21,425 - restore_processor - INFO - CSV検証エラー数: 0
+2025-07-15 18:29:21,425 - restore_processor - INFO - 総復元依頼数: 1
+2025-07-15 18:29:21,425 - restore_processor - INFO - 復元リクエスト送信数: 0
+2025-07-15 18:29:21,426 - restore_processor - INFO - 復元完了数: 0
+2025-07-15 18:29:21,426 - restore_processor - INFO - 失敗数: 0
