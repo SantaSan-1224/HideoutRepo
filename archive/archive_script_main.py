@@ -279,19 +279,202 @@ class ArchiveProcessor:
         """S3アップロード処理"""
         self.logger.info("S3アップロード開始")
         
-        # TODO: 実際のS3アップロード処理
-        results = []
-        for file_info in files:
-            result = {
-                'file_path': file_info['path'],
-                'success': True,
-                'error': None,
-                's3_key': f"archive/{file_info['path'].replace('\\', '/')}"
-            }
-            results.append(result)
+        try:
+            # boto3 S3クライアントの初期化
+            s3_client = self._initialize_s3_client()
+            
+            # 設定値の取得
+            bucket_name = self.config['aws']['s3_bucket']
+            storage_class = self.config['aws'].get('storage_class', 'GLACIER_DEEP_ARCHIVE')
+            max_retries = self.config['processing'].get('retry_count', 3)
+            
+            self.logger.info(f"S3バケット: {bucket_name}")
+            self.logger.info(f"ストレージクラス: {storage_class}")
+            self.logger.info(f"処理対象ファイル数: {len(files)}")
+            
+            results = []
+            successful_uploads = 0
+            failed_uploads = 0
+            
+            for i, file_info in enumerate(files, 1):
+                file_path = file_info['path']
+                file_size = file_info['size']
+                
+                # 進捗ログ
+                self.logger.info(f"[{i}/{len(files)}] アップロード中: {file_path} ({file_size:,} bytes)")
+                
+                # S3キーの生成
+                s3_key = self._generate_s3_key(file_path)
+                
+                # アップロード実行（リトライ付き）
+                upload_result = self._upload_file_with_retry(
+                    s3_client, file_path, bucket_name, s3_key, storage_class, max_retries
+                )
+                
+                if upload_result['success']:
+                    successful_uploads += 1
+                    self.logger.info(f"✓ アップロード成功: {s3_key}")
+                else:
+                    failed_uploads += 1
+                    self.logger.error(f"✗ アップロード失敗: {file_path} - {upload_result['error']}")
+                
+                # 結果をリストに追加
+                result = {
+                    'file_path': file_path,
+                    'file_size': file_size,
+                    'directory': file_info['directory'],
+                    'success': upload_result['success'],
+                    'error': upload_result.get('error'),
+                    's3_key': s3_key if upload_result['success'] else None,
+                    'modified_time': file_info['modified_time']
+                }
+                results.append(result)
+            
+            self.logger.info(f"S3アップロード完了")
+            self.logger.info(f"  - 成功: {successful_uploads}件")
+            self.logger.info(f"  - 失敗: {failed_uploads}件")
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"S3アップロード処理でエラーが発生: {str(e)}")
+            # 全てのファイルを失敗として記録
+            return [
+                {
+                    'file_path': f['path'],
+                    'file_size': f['size'],
+                    'directory': f['directory'],
+                    'success': False,
+                    'error': f"S3初期化エラー: {str(e)}",
+                    's3_key': None,
+                    'modified_time': f['modified_time']
+                }
+                for f in files
+            ]
+    
+    def _initialize_s3_client(self):
+        """S3クライアントの初期化"""
+        try:
+            import boto3
+            from botocore.config import Config
+            
+            # AWS設定の取得
+            aws_config = self.config.get('aws', {})
+            region = aws_config.get('region', 'ap-northeast-1')
+            vpc_endpoint_url = aws_config.get('vpc_endpoint_url')
+            
+            # boto3設定
+            config = Config(
+                region_name=region,
+                retries={
+                    'max_attempts': 3,
+                    'mode': 'adaptive'
+                }
+            )
+            
+            # S3クライアント作成
+            if vpc_endpoint_url:
+                self.logger.info(f"VPCエンドポイント経由で接続: {vpc_endpoint_url}")
+                s3_client = boto3.client('s3', endpoint_url=vpc_endpoint_url, config=config)
+            else:
+                self.logger.info("標準エンドポイント経由で接続")
+                s3_client = boto3.client('s3', config=config)
+            
+            # 接続テスト
+            self._test_s3_connection(s3_client, aws_config.get('s3_bucket'))
+            
+            return s3_client
+            
+        except ImportError:
+            raise Exception("boto3がインストールされていません。pip install boto3 を実行してください。")
+        except Exception as e:
+            raise Exception(f"S3クライアント初期化失敗: {str(e)}")
+    
+    def _test_s3_connection(self, s3_client, bucket_name):
+        """S3接続テスト"""
+        try:
+            # バケットの存在確認
+            response = s3_client.head_bucket(Bucket=bucket_name)
+            self.logger.info(f"S3バケット接続確認OK: {bucket_name}")
+        except Exception as e:
+            raise Exception(f"S3バケット接続失敗: {bucket_name} - {str(e)}")
+    
+    def _generate_s3_key(self, file_path: str) -> str:
+        """ファイルパスからS3キーを生成"""
+        try:
+            # Windowsパスを正規化
+            normalized_path = file_path.replace('\\', '/')
+            
+            # UNCパスの場合、サーバ名以降を使用
+            if normalized_path.startswith('//'):
+                # //server/share/path/file.txt -> share/path/file.txt
+                parts = normalized_path[2:].split('/')
+                if len(parts) > 1:
+                    normalized_path = '/'.join(parts[1:])
+            
+            # ドライブレター除去（C:/path/file.txt -> path/file.txt）
+            if len(normalized_path) > 2 and normalized_path[1] == ':':
+                normalized_path = normalized_path[3:]
+            
+            # アーカイブプレフィックスを追加
+            s3_key = f"archive/{normalized_path}"
+            
+            # 先頭のスラッシュを除去
+            s3_key = s3_key.lstrip('/')
+            
+            return s3_key
+            
+        except Exception as e:
+            self.logger.error(f"S3キー生成エラー: {file_path} - {str(e)}")
+            # フォールバック: ファイル名のみ使用
+            import os
+            filename = os.path.basename(file_path)
+            return f"archive/fallback/{filename}"
+    
+    def _upload_file_with_retry(self, s3_client, file_path: str, bucket_name: str, 
+                               s3_key: str, storage_class: str, max_retries: int) -> Dict:
+        """ファイルアップロード（リトライ付き）"""
         
-        self.logger.info("S3アップロード完了")
-        return results
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"アップロード試行 {attempt + 1}/{max_retries}: {s3_key}")
+                
+                # アップロード実行
+                s3_client.upload_file(
+                    file_path,
+                    bucket_name,
+                    s3_key,
+                    ExtraArgs={
+                        'StorageClass': storage_class
+                    }
+                )
+                
+                # 成功
+                return {'success': True, 'error': None}
+                
+            except FileNotFoundError:
+                # ファイルが見つからない場合はリトライしない
+                return {'success': False, 'error': 'ファイルが見つかりません'}
+                
+            except PermissionError:
+                # 権限エラーの場合はリトライしない
+                return {'success': False, 'error': 'ファイルアクセス権限がありません'}
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # 最後の試行でも失敗した場合
+                if attempt == max_retries - 1:
+                    return {'success': False, 'error': f'最大リトライ回数到達: {error_msg}'}
+                
+                # リトライ可能なエラーの場合は次の試行へ
+                self.logger.warning(f"アップロード失敗 (試行 {attempt + 1}/{max_retries}): {error_msg}")
+                
+                # 少し待機してからリトライ
+                import time
+                time.sleep(2 ** attempt)  # 指数バックオフ
+        
+        return {'success': False, 'error': '不明なエラー'}
         
     def create_archived_files(self, results: List[Dict]) -> List[Dict]:
         """アーカイブ後処理"""
