@@ -8,10 +8,128 @@
 
 ### 1.2 システム構成図
 
+```mermaid
+graph TB
+    %% ユーザー・依頼者
+    User[📋 依頼者<br/>社員番号7桁]
+
+    %% FASTワークフローシステム
+    FAST[🔄 FASTワークフロー<br/>依頼受付・承認]
+
+    %% CSV入力
+    CSV[📄 CSVファイル<br/>アーカイブ対象ディレクトリ]
+
+    %% 処理サーバ
+    Server[🖥️ AWS EC2<br/>4vCPU, 16GB<br/>アーカイブ処理サーバ]
+
+    %% アーカイブスクリプト
+    Script[🐍 Pythonスクリプト<br/>archive_script_main.py]
+
+    %% ファイルサーバ
+    FSx[💾 FSx for Windows<br/>File Server<br/>企業内ファイル]
+
+    %% S3ストレージ
+    S3[☁️ AWS S3<br/>Glacier Deep Archive<br/>アーカイブストレージ]
+
+    %% VPCエンドポイント
+    VPC[🔗 VPCエンドポイント<br/>S3接続]
+
+    %% データベース
+    DB[🗄️ PostgreSQL<br/>履歴管理DB]
+
+    %% Streamlitアプリ
+    Streamlit[🌐 Streamlitアプリ<br/>履歴閲覧・検索]
+
+    %% ログファイル
+    Logs[📊 ログファイル<br/>処理履歴・エラー]
+
+    %% エラーCSV
+    ErrorCSV[📄 エラーCSV<br/>再試行用]
+
+    %% 接続関係
+    User --> FAST
+    FAST --> CSV
+    CSV --> Script
+    Server --> Script
+    Script --> FSx
+    Script --> VPC
+    VPC --> S3
+    Script --> DB
+    Script --> Logs
+    Script --> ErrorCSV
+    DB --> Streamlit
+
+    %% サブグラフでグループ化
+    subgraph "AWS環境"
+        Server
+        S3
+        VPC
+        DB
+    end
+
+    subgraph "企業内環境"
+        FSx
+        FAST
+    end
+
+    subgraph "出力ファイル"
+        Logs
+        ErrorCSV
+    end
+
+    %% スタイル
+    classDef awsService fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:#fff
+    classDef internalService fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef userInterface fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef dataStorage fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef outputFile fill:#FF5722,stroke:#D84315,stroke-width:2px,color:#fff
+
+    class S3,VPC,Server awsService
+    class FSx,FAST internalService
+    class User,Streamlit,CSV userInterface
+    class DB dataStorage
+    class Logs,ErrorCSV outputFile
 ```
-[FASTワークフロー] → [アーカイブ処理サーバ] → [FSx/S3/PostgreSQL]
-     ↓                        ↓
-[CSVアップロード]         [Streamlitアプリ]
+
+### 1.3 処理フロー図
+
+```mermaid
+flowchart TD
+    Start([開始]) --> CSV_Input[📄 CSV読み込み<br/>ディレクトリパス検証]
+
+    CSV_Input --> CSV_Error{CSV検証<br/>エラー？}
+    CSV_Error -->|Yes| CSV_Retry[📄 再試行用CSV生成<br/>logs/]
+    CSV_Error -->|No| File_Collect[📁 ファイル収集<br/>対象ディレクトリ走査]
+    CSV_Retry --> File_Collect
+
+    File_Collect --> S3_Upload[☁️ S3アップロード<br/>Glacier Deep Archive]
+
+    S3_Upload --> Upload_Success{アップロード<br/>成功？}
+    Upload_Success -->|No| Archive_Error[📄 アーカイブエラーCSV<br/>再試行用フォーマット]
+    Upload_Success -->|Yes| Create_Empty[📄 空ファイル作成<br/>元ファイル名_archived]
+
+    Create_Empty --> Empty_Success{空ファイル<br/>作成成功？}
+    Empty_Success -->|No| Archive_Error
+    Empty_Success -->|Yes| Delete_Original[🗑️ 元ファイル削除]
+
+    Delete_Original --> Delete_Success{削除<br/>成功？}
+    Delete_Success -->|No| Cleanup[🧹 空ファイル削除<br/>クリーンアップ]
+    Delete_Success -->|Yes| DB_Insert[🗄️ DB登録<br/>archive_history]
+
+    Cleanup --> Archive_Error
+    Archive_Error --> Process_End
+    DB_Insert --> Process_End([処理完了])
+
+    %% スタイル
+    classDef processBox fill:#E3F2FD,stroke:#1976D2,stroke-width:2px
+    classDef decisionBox fill:#FFF3E0,stroke:#F57C00,stroke-width:2px
+    classDef errorBox fill:#FFEBEE,stroke:#D32F2F,stroke-width:2px
+    classDef successBox fill:#E8F5E8,stroke:#4CAF50,stroke-width:2px
+
+    class CSV_Input,File_Collect,S3_Upload,Create_Empty,Delete_Original,DB_Insert processBox
+    class CSV_Error,Upload_Success,Empty_Success,Delete_Success decisionBox
+    class CSV_Retry,Archive_Error,Cleanup errorBox
+    class Process_End successBox
 ```
 
 ### 1.3 技術スタック
