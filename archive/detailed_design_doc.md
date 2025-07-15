@@ -393,8 +393,7 @@ CSV検証エラー:
     "timeout": 30
   },
   "request": {
-    "requester": "1234567",
-    "request_id": "REQ-2025-001"
+    "requester": "12345678"
   },
   "file_server": {
     "base_path": "\\\\server\\share\\",
@@ -413,12 +412,12 @@ CSV検証エラー:
 }
 ```
 
-#### 3.4.2 設定値の自動調整
+#### 3.4.3 設定項目の詳細
 
-- **ストレージクラス**: `GLACIER_DEEP_ARCHIVE` → `DEEP_ARCHIVE` 自動変換
-- **バケット名**: 前後スペースの自動除去
-- **デフォルト値**: 設定が不足している場合の自動補完
-- **設定読み込み失敗**: デフォルト設定で継続実行
+- **request.requester**: 8 桁社員番号（運用者固定）
+- **request_id**: コマンドライン引数で指定（実行ごとに変更）
+- **database.timeout**: データベース接続タイムアウト（秒）
+- **aws.storage_class**: 自動変換機能（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
 
 ## 4. Streamlit アプリケーション設計
 
@@ -574,7 +573,7 @@ archive/path/to/file2.txt,C:\restored\files\
 - [x] エラーハンドリングの強化（再試行可能 CSV フォーマット）
 - [x] S3 パス構造の改善（サーバ名ベース）
 - [x] アーカイブ後処理の実装（空ファイル作成 → 元ファイル削除）
-- [ ] データベース登録処理の実装
+- [x] データベース登録処理の実装（PostgreSQL、トランザクション管理）
 - [ ] 復元スクリプトの実装
 - [ ] 進捗確認機能の実装
 
@@ -643,6 +642,8 @@ s3://bucket/local_c/temp/file.txt
 - **S3 接続エラー**: VPC エンドポイント・認証情報確認
 - **権限エラー**: IAM ロールに`s3:PutObject`権限があるか確認
 - **データベース接続エラー**: 接続設定・ネットワーク確認
+- **データベース登録エラー**: requester（社員番号）が 8 桁か確認
+- **文字エンコーディングエラー**: psql で`set PGCLIENTENCODING=UTF8`または pgAdmin 使用
 - **ファイルアクセスエラー**: 権限・パス存在確認
 
 #### 9.4.2 ログの確認ポイント
@@ -650,23 +651,27 @@ s3://bucket/local_c/temp/file.txt
 ```
 # 成功パターン
 ✓ アップロード成功: server/share/project1/file.txt
+✓ アーカイブ後処理完了: \\server\share\file.txt
+データベース挿入完了: 2件
 
 # 失敗パターン
 ✗ アップロード失敗: \\server\share\file.txt - AccessDenied
-エラー理由の内訳:
-  - AccessDenied: 5件
-  - NoSuchBucket: 3件
+データベース登録エラー: 値は型character varying(8)としては長すぎます
 ```
 
-#### 9.4.3 再試行用 CSV 確認
+#### 9.4.3 データベース確認コマンド
 
-```bash
-# 生成された再試行用CSVの確認
-cat logs/test_directories_archive_retry_20250715_152204.csv
+```sql
+-- 基本確認（文字化け回避）
+SELECT id, request_id, requester, file_size, created_at
+FROM archive_history ORDER BY created_at DESC LIMIT 5;
 
-# 元CSVと同じフォーマットか確認
-Directory Path
-\\server\share\failed_directory
+-- 件数確認
+SELECT COUNT(*) FROM archive_history;
+
+-- 依頼ID別集計
+SELECT request_id, COUNT(*), SUM(file_size)
+FROM archive_history GROUP BY request_id;
 ```
 
 ## 10. 更新履歴
@@ -677,15 +682,19 @@ Directory Path
 | 2025-07-15 | 1.1        | CSV 検証エラー処理改善、S3 アップロード実装   | システム開発チーム |
 | 2025-07-15 | 1.2        | エラー CSV 出力先変更、再試行フォーマット実装 | システム開発チーム |
 | 2025-07-15 | 1.3        | アーカイブ後処理実装完了                      | システム開発チーム |
+| 2025-07-15 | 1.4        | データベース登録処理実装完了                  | システム開発チーム |
 
-### 主要な変更内容（v1.3）
+### 主要な変更内容（v1.4）
 
-- アーカイブ後処理の実装完了
-  - 安全な処理順序：空ファイル作成 → 元ファイル削除
-  - 完全な空ファイル（0 バイト、拡張子なしサフィックス）
-  - 失敗時の自動クリーンアップ機能
-- 設定ファイルの archived_suffix から.txt 拡張子削除
-- エラーハンドリングの強化
+- データベース登録処理の実装完了
+  - PostgreSQL 接続・トランザクション管理
+  - アーカイブ完了ファイルのみ登録
+  - S3 完全 URL 形式での保存
+  - バッチ挿入による効率化
+- データベーススキーマの 8 桁社員番号対応
+- request_id 取得方法の改善（コマンドライン引数優先）
+- 設定ファイルの簡素化（request_id を削除）
+- 文字エンコーディング問題の対処法追加
 
 ---
 
