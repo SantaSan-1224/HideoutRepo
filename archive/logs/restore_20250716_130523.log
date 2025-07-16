@@ -1,0 +1,42 @@
+2025-07-16 13:05:23,348 - restore_processor - INFO - ログファイル: logs\restore_20250716_130523.log
+2025-07-16 13:05:23,348 - restore_processor - INFO - 復元処理開始 - Request ID: REQ-RESTORE-TEST-001, Mode: download
+2025-07-16 13:05:23,349 - restore_processor - INFO - === ダウンロード実行モード ===
+2025-07-16 13:05:23,349 - restore_processor - INFO - 復元ステータス読み込み完了: 1件
+2025-07-16 13:05:23,349 - restore_processor - INFO - 復元ステータスを確認しています...
+2025-07-16 13:05:23,350 - restore_processor - INFO - 復元完了確認開始
+2025-07-16 13:05:23,351 - restore_processor - INFO - 復元ステータス確認対象: 1件
+2025-07-16 13:05:23,670 - restore_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-07-16 13:05:23,976 - restore_processor - INFO - S3クライアント初期化成功
+2025-07-16 13:05:24,308 - restore_processor - INFO - ✓ 復元完了: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt
+2025-07-16 13:05:24,309 - restore_processor - INFO - 復元完了確認完了
+2025-07-16 13:05:24,311 - restore_processor - INFO -   - 復元完了: 1件
+2025-07-16 13:05:24,311 - restore_processor - INFO -   - 処理中: 0件
+2025-07-16 13:05:24,312 - restore_processor - INFO -   - 確認失敗: 0件
+2025-07-16 13:05:24,312 - restore_processor - INFO - 復元完了ファイルがあります。ダウンロード処理を実行してください:
+2025-07-16 13:05:24,312 - restore_processor - INFO - python restore_script_main.py [csv_path] REQ-RESTORE-TEST-001 --download-only
+2025-07-16 13:05:24,315 - restore_processor - INFO - 復元完了ファイル: 1件をダウンロードします
+2025-07-16 13:05:24,315 - restore_processor - INFO - ファイルダウンロード・配置開始
+2025-07-16 13:05:24,316 - restore_processor - INFO - ダウンロード対象ファイル数: 1件
+2025-07-16 13:05:24,316 - restore_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-07-16 13:05:24,335 - restore_processor - INFO - S3クライアント初期化成功
+2025-07-16 13:05:24,336 - restore_processor - INFO - 一時ダウンロード先: temp_downloads
+2025-07-16 13:05:24,336 - restore_processor - INFO - 同名ファイルスキップ: True
+2025-07-16 13:05:24,336 - restore_processor - INFO - [1/1] ダウンロード処理中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt
+2025-07-16 13:05:24,643 - restore_processor - WARNING - ダウンロード失敗 (試行 1/3): ダウンロードファイルが空またはファイルが作成されませんでした
+2025-07-16 13:05:25,698 - restore_processor - WARNING - ダウンロード失敗 (試行 2/3): ダウンロードファイルが空またはファイルが作成されませんでした
+2025-07-16 13:05:27,731 - restore_processor - ERROR - ✗ ダウンロード失敗: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt - 最大リトライ回数到達: ダウンロードファイルが空またはファイルが作成されませんでした
+2025-07-16 13:05:27,731 - restore_processor - INFO - ファイルダウンロード・配置完了
+2025-07-16 13:05:27,734 - restore_processor - INFO -   - 成功: 0件
+2025-07-16 13:05:27,735 - restore_processor - INFO -   - スキップ: 0件
+2025-07-16 13:05:27,735 - restore_processor - INFO -   - 失敗: 1件
+2025-07-16 13:05:27,739 - restore_processor - INFO - 復元ステータス保存: logs\restore_status_REQ-RESTORE-TEST-001.json
+2025-07-16 13:05:27,739 - restore_processor - INFO - ダウンロード処理完了
+2025-07-16 13:05:27,739 - restore_processor - INFO -   - ダウンロード成功: 0件
+2025-07-16 13:05:27,740 - restore_processor - INFO -   - スキップ: 0件
+2025-07-16 13:05:27,740 - restore_processor - INFO - === 復元処理統計 ===
+2025-07-16 13:05:27,741 - restore_processor - INFO - 処理時間: 0:00:04.392257
+2025-07-16 13:05:27,741 - restore_processor - INFO - CSV検証エラー数: 0
+2025-07-16 13:05:27,741 - restore_processor - INFO - 総復元依頼数: 1
+2025-07-16 13:05:27,742 - restore_processor - INFO - 復元リクエスト送信数: 0
+2025-07-16 13:05:27,743 - restore_processor - INFO - 復元完了数: 0
+2025-07-16 13:05:27,744 - restore_processor - INFO - 失敗数: 0
