@@ -592,20 +592,225 @@ class RestoreProcessor:
                 request['restore_check_time'] = datetime.datetime.now().isoformat()
             return restore_requests
         
+    def download_and_place_files(self, restore_requests: List[Dict]) -> List[Dict]:
+        """ファイルダウンロード・配置処理"""
+        self.logger.info("ファイルダウンロード・配置開始")
+        
+        # 復元完了ファイルのみを対象とする
+        completed_requests = [req for req in restore_requests 
+                             if req.get('restore_status') == 'completed']
+        
+        if not completed_requests:
+            self.logger.info("ダウンロード対象ファイルがありません")
+            return restore_requests
+        
+        self.logger.info(f"ダウンロード対象ファイル数: {len(completed_requests)}件")
+        
+        try:
+            # S3クライアント初期化
+            s3_client = self._initialize_s3_client()
+            
+            # 設定値取得
+            restore_config = self.config.get('restore', {})
+            retry_count = restore_config.get('download_retry_count', 3)
+            skip_existing = restore_config.get('skip_existing_files', True)
+            temp_dir = restore_config.get('temp_download_directory', 'temp_downloads')
+            
+            # 一時ダウンロードディレクトリの作成
+            temp_path = Path(temp_dir)
+            temp_path.mkdir(exist_ok=True)
+            
+            self.logger.info(f"一時ダウンロード先: {temp_path}")
+            self.logger.info(f"同名ファイルスキップ: {skip_existing}")
+            
+            successful_downloads = 0
+            failed_downloads = 0
+            skipped_files = 0
+            
+            for i, request in enumerate(completed_requests, 1):
+                bucket = request.get('bucket')
+                key = request.get('key')
+                original_path = request.get('original_file_path')
+                restore_dir = request.get('restore_directory')
+                
+                if not all([bucket, key, original_path, restore_dir]):
+                    self.logger.error(f"必要な情報が不足: {original_path}")
+                    request['download_status'] = 'failed'
+                    request['download_error'] = '必要な情報が不足しています'
+                    failed_downloads += 1
+                    continue
+                
+                # 進捗ログ
+                self.logger.info(f"[{i}/{len(completed_requests)}] ダウンロード処理中: {original_path}")
+                
+                # 復元先ファイルパスの生成
+                original_filename = os.path.basename(original_path)
+                destination_path = os.path.join(restore_dir, original_filename)
+                
+                # 同名ファイルの存在チェック
+                if skip_existing and os.path.exists(destination_path):
+                    self.logger.info(f"同名ファイルが存在するためスキップ: {destination_path}")
+                    request['download_status'] = 'skipped'
+                    request['download_error'] = '同名ファイルが既に存在します'
+                    request['destination_path'] = destination_path
+                    skipped_files += 1
+                    continue
+                
+                # 一時ファイルパスの生成
+                temp_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_filename}"
+                temp_file_path = temp_path / temp_filename
+                
+                # S3からダウンロード（リトライ付き）
+                download_result = self._download_file_with_retry(
+                    s3_client, bucket, key, str(temp_file_path), retry_count
+                )
+                
+                if not download_result['success']:
+                    self.logger.error(f"✗ ダウンロード失敗: {original_path} - {download_result['error']}")
+                    request['download_status'] = 'failed'
+                    request['download_error'] = download_result['error']
+                    failed_downloads += 1
+                    continue
+                
+                # ファイルサイズ確認
+                try:
+                    downloaded_size = os.path.getsize(temp_file_path)
+                    self.logger.debug(f"ダウンロードサイズ: {downloaded_size:,} bytes")
+                    request['downloaded_size'] = downloaded_size
+                except Exception as e:
+                    self.logger.warning(f"ダウンロードサイズ確認エラー: {e}")
+                
+                # 最終配置（一時ファイル → 復元先）
+                placement_result = self._place_file_to_destination(
+                    str(temp_file_path), destination_path
+                )
+                
+                if placement_result['success']:
+                    # 成功
+                    request['download_status'] = 'completed'
+                    request['destination_path'] = destination_path
+                    request['download_completed_time'] = datetime.datetime.now().isoformat()
+                    successful_downloads += 1
+                    self.logger.info(f"✓ ダウンロード完了: {original_path} -> {destination_path}")
+                    
+                    # 一時ファイルのクリーンアップ
+                    try:
+                        os.remove(temp_file_path)
+                    except Exception as e:
+                        self.logger.warning(f"一時ファイル削除エラー: {e}")
+                    
+                else:
+                    # 配置失敗
+                    self.logger.error(f"✗ ファイル配置失敗: {original_path} - {placement_result['error']}")
+                    request['download_status'] = 'failed'
+                    request['download_error'] = f"ファイル配置失敗: {placement_result['error']}"
+                    failed_downloads += 1
+                    
+                    # 一時ファイルのクリーンアップ
+                    try:
+                        os.remove(temp_file_path)
+                    except Exception as e:
+                        self.logger.warning(f"一時ファイル削除エラー: {e}")
+            
+            # 統計更新
+            self.stats['restore_completed'] = successful_downloads
+            
+            self.logger.info("ファイルダウンロード・配置完了")
+            self.logger.info(f"  - 成功: {successful_downloads}件")
+            self.logger.info(f"  - スキップ: {skipped_files}件")
+            self.logger.info(f"  - 失敗: {failed_downloads}件")
+            
+            return restore_requests
+            
+        except Exception as e:
+            self.logger.error(f"ダウンロード・配置処理でエラーが発生: {str(e)}")
+            # 全ての完了リクエストを失敗としてマーク
+            for request in completed_requests:
+                if 'download_status' not in request:
+                    request['download_status'] = 'failed'
+                    request['download_error'] = f'処理エラー: {str(e)}'
+            return restore_requests
+
+    def _download_file_with_retry(self, s3_client, bucket: str, key: str, 
+                                 local_path: str, max_retries: int) -> Dict:
+        """S3からファイルダウンロード（リトライ付き）"""
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"ダウンロード試行 {attempt + 1}/{max_retries}: s3://{bucket}/{key}")
+                
+                # S3からダウンロード
+                s3_client.download_file(bucket, key, local_path)
+                
+                # ダウンロード成功確認
+                if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                    return {'success': True, 'error': None}
+                else:
+                    raise Exception("ダウンロードファイルが空またはファイルが作成されませんでした")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                
+                # 特定のエラーはリトライしない
+                if any(err in error_msg for err in ['NoSuchKey', 'AccessDenied', 'InvalidObjectState']):
+                    return {'success': False, 'error': error_msg}
+                
+                # 最後の試行でも失敗した場合
+                if attempt == max_retries - 1:
+                    return {'success': False, 'error': f'最大リトライ回数到達: {error_msg}'}
+                
+                # リトライ可能なエラーの場合は次の試行へ
+                self.logger.warning(f"ダウンロード失敗 (試行 {attempt + 1}/{max_retries}): {error_msg}")
+                
+                # 失敗した一時ファイルがあれば削除
+                try:
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                except Exception:
+                    pass
+                
+                # 少し待機してからリトライ
+                import time
+                time.sleep(2 ** attempt)  # 指数バックオフ
+        
+        return {'success': False, 'error': '不明なエラー'}
+
+    def _place_file_to_destination(self, temp_path: str, destination_path: str) -> Dict:
+        """一時ファイルを最終配置先に移動"""
+        try:
+            # 配置先ディレクトリの確認・作成
+            destination_dir = os.path.dirname(destination_path)
+            if not os.path.exists(destination_dir):
+                self.logger.warning(f"配置先ディレクトリが存在しません: {destination_dir}")
+                return {'success': False, 'error': '配置先ディレクトリが存在しません'}
+            
+            # 書き込み権限確認
+            if not os.access(destination_dir, os.W_OK):
+                return {'success': False, 'error': '配置先ディレクトリへの書き込み権限がありません'}
+            
+            # ファイル移動
+            import shutil
+            shutil.move(temp_path, destination_path)
+            
+            # 移動成功確認
+            if os.path.exists(destination_path):
+                return {'success': True, 'error': None}
+            else:
+                return {'success': False, 'error': 'ファイル移動後に配置先にファイルが見つかりません'}
+                
+        except PermissionError:
+            return {'success': False, 'error': '権限エラー: ファイル移動ができません'}
+        except OSError as e:
+            return {'success': False, 'error': f'OS エラー: {str(e)}'}
+        except Exception as e:
+            return {'success': False, 'error': f'予期しないエラー: {str(e)}'}
+        
     def wait_for_restore_completion(self, restore_requests: List[Dict]) -> List[Dict]:
         """復元完了待機処理"""
         self.logger.info("復元完了待機開始")
         
         # TODO: 実装
         self.logger.info("復元完了待機完了")
-        return restore_requests
-        
-    def download_and_place_files(self, restore_requests: List[Dict]) -> List[Dict]:
-        """ファイルダウンロード・配置"""
-        self.logger.info("ファイルダウンロード・配置開始")
-        
-        # TODO: 実装
-        self.logger.info("ファイルダウンロード・配置完了")
         return restore_requests
         
     def generate_restore_error_csv(self, original_csv_path: str) -> Optional[str]:
@@ -781,8 +986,12 @@ class RestoreProcessor:
         
         downloaded_count = len([req for req in restore_requests 
                               if req.get('download_status') == 'completed'])
+        skipped_count = len([req for req in restore_requests 
+                           if req.get('download_status') == 'skipped'])
         
-        self.logger.info(f"ダウンロード処理完了 - {downloaded_count}件")
+        self.logger.info(f"ダウンロード処理完了")
+        self.logger.info(f"  - ダウンロード成功: {downloaded_count}件")
+        self.logger.info(f"  - スキップ: {skipped_count}件")
         
         # 未完了ファイルがある場合の案内
         remaining_count = len([req for req in restore_requests 
