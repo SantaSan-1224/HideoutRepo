@@ -742,14 +742,22 @@ class RestoreProcessor:
                 # S3からダウンロード
                 s3_client.download_file(bucket, key, local_path)
                 
-                # ダウンロード成功確認
-                if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-                    return {'success': True, 'error': None}
+                # ダウンロード成功確認（0バイトファイルも成功として扱う）
+                if os.path.exists(local_path):
+                    file_size = os.path.getsize(local_path)
+                    self.logger.debug(f"ダウンロード完了: ファイルサイズ {file_size} bytes")
+                    return {'success': True, 'error': None, 'file_size': file_size}
                 else:
-                    raise Exception("ダウンロードファイルが空またはファイルが作成されませんでした")
+                    raise Exception("ダウンロード後にファイルが作成されませんでした")
                     
             except Exception as e:
                 error_msg = str(e)
+                
+                # S3側のエラー詳細をログ出力
+                if hasattr(e, 'response'):
+                    error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                    error_message = e.response.get('Error', {}).get('Message', 'Unknown')
+                    self.logger.error(f"S3エラー: {error_code} - {error_message}")
                 
                 # 特定のエラーはリトライしない
                 if any(err in error_msg for err in ['NoSuchKey', 'AccessDenied', 'InvalidObjectState']):
