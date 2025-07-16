@@ -693,11 +693,15 @@ class RestoreProcessor:
                     successful_downloads += 1
                     self.logger.info(f"✓ ダウンロード完了: {original_path} -> {destination_path}")
                     
-                    # 一時ファイルのクリーンアップ
+                    # 一時ファイルのクリーンアップ（move後は自動削除されるが念のため確認）
                     try:
-                        os.remove(temp_file_path)
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                            self.logger.debug(f"一時ファイル削除成功: {temp_file_path}")
+                        else:
+                            self.logger.debug(f"一時ファイルは既に削除済み: {temp_file_path}")
                     except Exception as e:
-                        self.logger.warning(f"一時ファイル削除エラー: {e}")
+                        self.logger.debug(f"一時ファイル削除処理: {e}")
                     
                 else:
                     # 配置失敗
@@ -708,7 +712,9 @@ class RestoreProcessor:
                     
                     # 一時ファイルのクリーンアップ
                     try:
-                        os.remove(temp_file_path)
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                            self.logger.debug(f"一時ファイル削除成功: {temp_file_path}")
                     except Exception as e:
                         self.logger.warning(f"一時ファイル削除エラー: {e}")
             
