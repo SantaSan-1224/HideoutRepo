@@ -11,19 +11,21 @@
 ```mermaid
 graph TB
     %% ユーザー・依頼者
-    User[📋 依頼者<br/>社員番号7桁]
+    User[📋 依頼者<br/>社員番号8桁]
 
     %% FASTワークフローシステム
     FAST[🔄 FASTワークフロー<br/>依頼受付・承認]
 
     %% CSV入力
-    CSV[📄 CSVファイル<br/>アーカイブ対象ディレクトリ]
+    CSV_Archive[📄 アーカイブCSV<br/>対象ディレクトリ]
+    CSV_Restore[📄 復元依頼CSV<br/>元ファイルパス+復元先]
 
     %% 処理サーバ
-    Server[🖥️ AWS EC2<br/>4vCPU, 16GB<br/>アーカイブ処理サーバ]
+    Server[🖥️ AWS EC2<br/>4vCPU, 16GB<br/>処理サーバ]
 
-    %% アーカイブスクリプト
-    Script[🐍 Pythonスクリプト<br/>archive_script_main.py]
+    %% スクリプト群
+    ArchiveScript[🐍 archive_script_main.py<br/>アーカイブ処理]
+    RestoreScript[🐍 restore_script_main.py<br/>復元処理]
 
     %% ファイルサーバ
     FSx[💾 FSx for Windows<br/>File Server<br/>企業内ファイル]
@@ -40,23 +42,35 @@ graph TB
     %% Streamlitアプリ
     Streamlit[🌐 Streamlitアプリ<br/>履歴閲覧・検索]
 
-    %% ログファイル
+    %% ログ・ステータスファイル
     Logs[📊 ログファイル<br/>処理履歴・エラー]
-
-    %% エラーCSV
-    ErrorCSV[📄 エラーCSV<br/>再試行用]
+    Status[📄 復元ステータス<br/>JSON形式]
 
     %% 接続関係
     User --> FAST
-    FAST --> CSV
-    CSV --> Script
-    Server --> Script
-    Script --> FSx
-    Script --> VPC
+    FAST --> CSV_Archive
+    FAST --> CSV_Restore
+
+    CSV_Archive --> ArchiveScript
+    CSV_Restore --> RestoreScript
+
+    Server --> ArchiveScript
+    Server --> RestoreScript
+
+    ArchiveScript --> FSx
+    ArchiveScript --> VPC
+    RestoreScript --> VPC
+    RestoreScript --> FSx
+
     VPC --> S3
-    Script --> DB
-    Script --> Logs
-    Script --> ErrorCSV
+
+    ArchiveScript --> DB
+    RestoreScript --> DB
+
+    ArchiveScript --> Logs
+    RestoreScript --> Logs
+    RestoreScript --> Status
+
     DB --> Streamlit
 
     %% サブグラフでグループ化
@@ -72,9 +86,14 @@ graph TB
         FAST
     end
 
+    subgraph "処理スクリプト"
+        ArchiveScript
+        RestoreScript
+    end
+
     subgraph "出力ファイル"
         Logs
-        ErrorCSV
+        Status
     end
 
     %% スタイル
@@ -82,16 +101,67 @@ graph TB
     classDef internalService fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
     classDef userInterface fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
     classDef dataStorage fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
-    classDef outputFile fill:#FF5722,stroke:#D84315,stroke-width:2px,color:#fff
+    classDef scriptService fill:#FF5722,stroke:#D84315,stroke-width:2px,color:#fff
+    classDef outputFile fill:#795548,stroke:#5D4037,stroke-width:2px,color:#fff
 
     class S3,VPC,Server awsService
     class FSx,FAST internalService
-    class User,Streamlit,CSV userInterface
+    class User,Streamlit,CSV_Archive,CSV_Restore userInterface
     class DB dataStorage
-    class Logs,ErrorCSV outputFile
+    class ArchiveScript,RestoreScript scriptService
+    class Logs,Status outputFile
 ```
 
-### 1.3 処理フロー図
+### 1.3 技術スタック
+
+- **処理サーバ**: AWS EC2（4vCPU、16GB メモリ）
+- **言語**: Python 3.8 以上
+- **データベース**: PostgreSQL
+- **Web アプリ**: Streamlit
+- **AWS 連携**: boto3、AWS CLI
+- **ファイルサーバ**: FSx for Windows File Server
+- **テストフレームワーク**: pytest、pytest-cov
+
+## 2. データベース設計
+
+### 2.1 テーブル設計
+
+#### 2.1.1 archive_history テーブル
+
+| カラム名           | データ型    | 制約                                | 説明                     |
+| ------------------ | ----------- | ----------------------------------- | ------------------------ |
+| id                 | BIGSERIAL   | PRIMARY KEY                         | 主キー（自動採番）       |
+| request_id         | VARCHAR(50) | NOT NULL                            | 依頼 ID                  |
+| requester          | VARCHAR(8)  | NOT NULL, CHECK                     | 依頼者（社員番号 8 桁）  |
+| request_date       | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 依頼日時                 |
+| approval_date      | TIMESTAMP   |                                     | 承認日時                 |
+| original_file_path | TEXT        | NOT NULL                            | 元ファイルパス           |
+| s3_path            | TEXT        | NOT NULL                            | S3 パス                  |
+| archive_date       | TIMESTAMP   | NOT NULL                            | アーカイブ日時           |
+| file_size          | BIGINT      | CHECK >= 0                          | ファイルサイズ（バイト） |
+| created_at         | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時                 |
+| updated_at         | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新日時                 |
+
+**注意**: S3 アップロード成功時のみ記録
+
+### 2.2 インデックス設計
+
+```sql
+-- 検索用インデックス
+CREATE INDEX idx_archive_history_requester ON archive_history(requester);
+CREATE INDEX idx_archive_history_request_date ON archive_history(request_date);
+CREATE INDEX idx_archive_history_request_id ON archive_history(request_id);
+
+-- ファイルパス検索用（復元処理で使用）
+CREATE INDEX idx_archive_history_original_file_path ON archive_history USING gin(original_file_path gin_trgm_ops);
+
+-- 複合インデックス
+CREATE INDEX idx_archive_history_requester_date ON archive_history(requester, request_date);
+```
+
+## 3. アーカイブスクリプト設計
+
+### 3.1 アーカイブ処理フロー
 
 ```mermaid
 flowchart TD
@@ -132,57 +202,7 @@ flowchart TD
     class Process_End successBox
 ```
 
-### 1.3 技術スタック
-
-- **処理サーバ**: AWS EC2（4vCPU、16GB メモリ）
-- **言語**: Python 3.x
-- **データベース**: PostgreSQL
-- **Web アプリ**: Streamlit
-- **AWS 連携**: boto3、AWS CLI
-- **ファイルサーバ**: FSx for Windows File Server
-
-## 2. データベース設計
-
-### 2.1 テーブル設計
-
-#### 2.1.1 archive_history テーブル
-
-| カラム名           | データ型    | 制約                                | 説明                     |
-| ------------------ | ----------- | ----------------------------------- | ------------------------ |
-| id                 | BIGSERIAL   | PRIMARY KEY                         | 主キー（自動採番）       |
-| request_id         | VARCHAR(50) | NOT NULL                            | 依頼 ID                  |
-| requester          | VARCHAR(7)  | NOT NULL, CHECK                     | 依頼者（社員番号 7 桁）  |
-| request_date       | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 依頼日時                 |
-| approval_date      | TIMESTAMP   |                                     | 承認日時                 |
-| original_file_path | TEXT        | NOT NULL                            | 元ファイルパス           |
-| s3_path            | TEXT        | NOT NULL                            | S3 パス                  |
-| archive_date       | TIMESTAMP   | NOT NULL                            | アーカイブ日時           |
-| file_size          | BIGINT      | CHECK >= 0                          | ファイルサイズ（バイト） |
-| created_at         | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時                 |
-| updated_at         | TIMESTAMP   | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新日時                 |
-
-**注意**: S3 アップロード成功時のみ記録するため、process_status、process_result カラムは削除
-
-### 2.2 インデックス設計
-
-```sql
--- 検索用インデックス
-CREATE INDEX idx_archive_history_requester ON archive_history(requester);
-CREATE INDEX idx_archive_history_request_date ON archive_history(request_date);
-CREATE INDEX idx_archive_history_request_id ON archive_history(request_id);
-
--- ファイルパス検索用（部分一致）
-CREATE INDEX idx_archive_history_original_file_path ON archive_history USING gin(original_file_path gin_trgm_ops);
-
--- 複合インデックス
-CREATE INDEX idx_archive_history_requester_date ON archive_history(requester, request_date);
-```
-
-## 3. アーカイブスクリプト設計
-
-### 3.1 クラス設計
-
-#### 3.1.1 ArchiveProcessor クラス
+### 3.2 ArchiveProcessor クラス設計
 
 **責務**: アーカイブ処理の全体制御
 
@@ -208,288 +228,31 @@ class ArchiveProcessor:
     def run(csv_path: str, request_id: str) -> int
 ```
 
-**インスタンス変数**:
+### 3.3 アーカイブ処理詳細
 
-- `self.config`: 設定情報
-- `self.logger`: ログ出力
-- `self.csv_errors`: CSV 検証エラー項目のリスト
-- `self.stats`: 処理統計情報
+#### 3.3.1 CSV 読み込み・検証処理
 
-### 3.2 処理フロー詳細
+- UTF-8-SIG 対応
+- ヘッダー行自動検出・スキップ
+- ディレクトリ検証（存在・権限・パス長・不正文字）
+- エラー項目記録（処理継続）
 
-#### 3.2.1 CSV 読み込み・検証処理
+#### 3.3.2 S3 アップロード処理
 
-```
-1. CSVファイル読み込み（UTF-8-SIG対応）
-2. 行単位での処理
-   - 空行スキップ
-   - ヘッダー行検出・スキップ
-   - パス正規化
-3. ディレクトリ検証（詳細エラー理由付き）
-   - 存在チェック
-   - アクセス権限チェック
-   - パス長制限チェック（260文字）
-   - 不正文字チェック（<>:"|?*）
-4. エラー項目記録（処理継続）
-   - self.csv_errorsにエラー詳細を保存
-   - 有効なディレクトリとエラー項目をタプルで返却
-5. エラーCSV生成（必要時）
-   - logsディレクトリに再試行用フォーマットで出力
-```
+- VPC エンドポイント対応
+- ストレージクラス自動変換（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
+- サーバ名ベース S3 キー生成
+- 指数バックオフリトライ（最大 3 回）
 
-**戻り値**: `Tuple[List[str], List[Dict]]`
+#### 3.3.3 アーカイブ後処理
 
-- List[str]: 有効なディレクトリパス
-- List[Dict]: エラー項目（line_number, path, error_reason, original_line）
+- 空ファイル作成（{元ファイル名}\_archived）
+- 元ファイル削除
+- 失敗時の自動クリーンアップ
 
-#### 3.2.2 ファイル収集処理
+## 4. 復元スクリプト設計
 
-```
-1. 各ディレクトリをos.walkで走査
-2. ファイルごとの処理
-   - 除外拡張子チェック
-   - ファイルサイズ制限チェック
-   - ファイル情報取得（サイズ、更新日時）
-3. ファイル情報リスト生成
-```
-
-#### 3.2.3 S3 アップロード処理
-
-```
-1. boto3 S3クライアント初期化
-   - VPCエンドポイント対応
-   - 接続テスト実行
-   - ストレージクラス自動変換（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
-2. S3キー生成（サーバ名ベース）
-   - UNCパス: \\server\share\path → server/share/path
-   - ローカルパス: C:\path → local_c/path
-   - フォールバック: fallback/timestamp/filename
-3. ファイル単位でのアップロード
-   - Deep Archive直接指定
-   - 指数バックオフリトライ（最大3回）
-   - 権限エラー・ファイル不存在はリトライしない
-4. 進捗ログ出力
-   - [n/total] 形式の進捗表示
-   - 成功/失敗の詳細ログ
-5. アップロード結果記録
-   - success, error, s3_key, file_size等の情報を保持
-```
-
-**エラーハンドリング**:
-
-- FileNotFoundError: リトライなし
-- PermissionError: リトライなし
-- その他のエラー: 指数バックオフでリトライ
-
-#### 3.2.4 アーカイブ後処理
-
-```
-1. S3アップロード成功ファイルのみ処理
-2. 空ファイル作成
-   - ファイル名: {元ファイル名}{archived_suffix}
-   - 内容: 完全に空（0バイト）
-   - 拡張子: 元ファイルの拡張子は保持しない
-3. 空ファイル作成成功後に元ファイル削除
-4. 失敗時のクリーンアップ
-   - 作成済み空ファイルの削除
-   - 元ファイルの保護
-5. 処理結果記録
-   - archive_completed フラグの設定
-   - archived_file_path の記録
-```
-
-**処理順序の安全性**:
-
-- 空ファイル作成 → 元ファイル削除の順序で実行
-- 途中で失敗した場合、元ファイルは保護される
-- 作成済み空ファイルは自動的にクリーンアップ
-
-**空ファイル命名例**:
-
-```
-元ファイル: document.pdf → 空ファイル: document.pdf_archived
-元ファイル: data.xlsx → 空ファイル: data.xlsx_archived
-元ファイル: image.jpg → 空ファイル: image.jpg_archived
-```
-
-#### 3.2.5 データベース登録処理
-
-```
-1. PostgreSQL接続
-2. トランザクション開始
-3. archive_historyテーブル挿入
-4. コミット・ロールバック処理
-```
-
-### 3.3 エラーハンドリング設計
-
-#### 3.3.1 エラーレベル分類
-
-- **CRITICAL**: システム停止が必要なエラー
-- **ERROR**: 個別ファイル処理失敗
-- **WARNING**: 警告（処理継続可能）
-- **INFO**: 一般的な処理情報
-
-#### 3.3.2 エラー CSV 出力仕様
-
-**CSV 検証エラー用**: `logs/{元ファイル名}_csv_retry_{YYYYMMDD_HHMMSS}.csv`
-
-- 元 CSV と同じフォーマット（再実行可能）
-- エラーが発生したパスのみを記録
-- 詳細なエラー理由はログファイルに出力
-
-```csv
-Directory Path
-\\invalid\path
-\\another\invalid\path
-```
-
-**アーカイブエラー用**: `logs/{元ファイル名}_archive_retry_{YYYYMMDD_HHMMSS}.csv`
-
-- 元 CSV と同じフォーマット（再実行可能）
-- 失敗したファイルを含むディレクトリを重複除去して記録
-- エラー統計をログに出力
-
-```csv
-Directory Path
-\\server\share\failed_directory1
-\\server\share\failed_directory2
-```
-
-**出力先**: 全て logs ディレクトリに統一
-
-**エラー理由のログ出力例**:
-
-```
-CSV検証エラー:
-行 2: ディレクトリが存在しません ✗
-行 3: 不正な文字が含まれています: | ✗
-
-アーカイブエラー統計:
-エラー理由の内訳:
-  - AccessDenied: 5件
-  - NoSuchBucket: 3件
-  - ファイルアクセス権限がありません: 2件
-```
-
-### 3.4 設定ファイル設計
-
-#### 3.4.1 設定項目
-
-```json
-{
-  "aws": {
-    "region": "ap-northeast-1",
-    "s3_bucket": "your-archive-bucket",
-    "storage_class": "DEEP_ARCHIVE",
-    "vpc_endpoint_url": "https://bucket.vpce-xxx.s3.ap-northeast-1.vpce.amazonaws.com"
-  },
-  "database": {
-    "host": "localhost",
-    "port": 5432,
-    "database": "archive_system",
-    "user": "postgres",
-    "password": "password",
-    "timeout": 30
-  },
-  "request": {
-    "requester": "12345678"
-  },
-  "file_server": {
-    "base_path": "\\\\server\\share\\",
-    "archived_suffix": "_archived",
-    "exclude_extensions": [".tmp", ".lock", ".bak"]
-  },
-  "processing": {
-    "max_file_size": 10737418240,
-    "chunk_size": 8388608,
-    "retry_count": 3
-  },
-  "logging": {
-    "log_directory": "logs",
-    "log_level": "INFO"
-  }
-}
-```
-
-#### 3.4.3 設定項目の詳細
-
-- **request.requester**: 8 桁社員番号（運用者固定）
-- **request_id**: コマンドライン引数で指定（実行ごとに変更）
-- **database.timeout**: データベース接続タイムアウト（秒）
-- **aws.storage_class**: 自動変換機能（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
-
-## 4. Streamlit アプリケーション設計
-
-### 4.1 画面構成
-
-#### 4.1.1 メイン画面
-
-- **ヘッダー**: アプリケーション名、現在日時
-- **検索フィルター**: 日付範囲、依頼者、処理状況
-- **履歴一覧**: ページネーション対応テーブル
-- **集計情報**: ファイル数、総サイズ等の統計
-- **エクスポート**: Excel/CSV ダウンロードボタン
-
-#### 4.1.2 検索・フィルタリング機能
-
-```python
-# フィルター項目
-- 依頼日範囲（from_date, to_date）
-- 依頼者（社員番号）
-- 処理状況（複数選択可能）
-- ファイルパス（部分一致検索）
-```
-
-#### 4.1.3 データ表示項目
-
-- 依頼 ID
-- 依頼者
-- 依頼日時
-- 処理状況
-- 元ファイルパス（省略表示）
-- ファイルサイズ
-- アーカイブ日時
-- 処理結果
-
-### 4.2 機能詳細
-
-#### 4.2.1 履歴検索機能
-
-```sql
--- 基本検索クエリ
-SELECT id, request_id, requester, request_date,
-       process_status, original_file_path, file_size, archive_date
-FROM archive_history
-WHERE request_date BETWEEN %s AND %s
-  AND requester LIKE %s
-  AND process_status IN %s
-ORDER BY request_date DESC
-LIMIT %s OFFSET %s;
-```
-
-#### 4.2.2 集計機能
-
-```sql
--- 集計クエリ例
-SELECT
-    COUNT(*) as total_files,
-    SUM(file_size) as total_size,
-    COUNT(CASE WHEN process_status = 'completed' THEN 1 END) as completed_files,
-    COUNT(CASE WHEN process_status = 'error' THEN 1 END) as error_files
-FROM archive_history
-WHERE request_date BETWEEN %s AND %s;
-```
-
-#### 4.2.3 エクスポート機能
-
-- **Excel 形式**: `pandas.to_excel()`使用
-- **CSV 形式**: `pandas.to_csv()`使用
-- **ファイル名**: `archive_history_{YYYYMMDD_HHMMSS}.{xlsx|csv}`
-
-## 5. 復元スクリプト設計
-
-### 5.1 復元処理フロー
+### 4.1 復元処理フロー
 
 ```mermaid
 flowchart TD
@@ -524,32 +287,7 @@ flowchart TD
     class Request_End,Download_End,Wait_Message endBox
 ```
 
-### 5.2 復元 CSV 仕様
-
-#### 5.2.1 入力 CSV フォーマット
-
-```csv
-元ファイルパス,復元先ディレクトリ
-\\server\share\project1\file.txt,C:\restored\files\
-\\server\share\project2\data.xlsx,D:\backup\restore\
-\\server\share\archive\document.pdf,\\fileserver\shared\restored\
-```
-
-**項目説明**:
-
-- **元ファイルパス**: アーカイブ時の original_file_path（データベース検索キー）
-- **復元先ディレクトリ**: ファイルを復元する先のディレクトリパス
-
-#### 5.2.2 CSV 検証項目
-
-- 元ファイルパスの存在性（データベース内）
-- 復元先ディレクトリの存在・書き込み権限
-- パス長制限（260 文字）
-- CSV フォーマット妥当性
-
-### 5.3 復元処理詳細設計
-
-#### 5.3.1 RestoreProcessor クラス
+### 4.2 RestoreProcessor クラス設計
 
 **責務**: 復元処理の全体制御
 
@@ -566,46 +304,48 @@ class RestoreProcessor:
     def request_restore(restore_requests: List[Dict]) -> List[Dict]
     def check_restore_completion(restore_requests: List[Dict]) -> List[Dict]
     def download_and_place_files(restore_requests: List[Dict]) -> List[Dict]
+    def _download_file_with_retry(...) -> Dict
+    def _place_file_to_destination(temp_path: str, destination_path: str) -> Dict
     def _save_restore_status(restore_requests: List[Dict]) -> None
     def _load_restore_status() -> List[Dict]
     def run(csv_path: str, request_id: str, mode: str) -> int
 ```
 
-#### 5.3.2 実行モード設計
+### 4.3 復元処理詳細
 
-**1. 復元リクエスト送信モード** (`--request-only`)
+#### 4.3.1 復元依頼 CSV 検証
 
-```
-1. CSV読み込み・検証
-2. データベースからS3パス検索
-3. S3復元リクエスト送信
-4. 復元ステータスファイル保存
-```
+- 元ファイルパス+復元先ディレクトリの検証
+- 復元先の存在・書き込み権限確認
+- パス長制限・形式チェック
 
-**2. ダウンロード実行モード** (`--download-only`)
+#### 4.3.2 S3 復元リクエスト送信
 
-```
-1. 復元ステータスファイル読み込み
-2. S3復元ステータス確認（自動実行）
-3. 復元完了ファイルのフィルタリング
-4. 復元完了ファイルのダウンロード・配置
-5. ステータスファイル更新
-```
+- restore_object API 実行
+- 復元ティア指定（Standard/Expedited/Bulk）
+- 復元保持日数設定（デフォルト 7 日）
 
-**運用上の特徴**:
+#### 4.3.3 復元ステータス確認
 
-- ダウンロード実行時に復元ステータス確認も自動実行
-- 復元未完了ファイルがある場合、完了分のみ処理して未完了分は次回に持ち越し
-- シンプルな 2 段階実行フロー
+- head_object API で Restore ヘッダー確認
+- ステータス判定（pending/in_progress/completed/failed）
+- 復元有効期限抽出
 
-#### 5.3.3 復元ステータス管理
+#### 4.3.4 ダウンロード・配置処理
+
+- 一時ディレクトリでの安全なダウンロード
+- 0 バイトファイル対応
+- 同名ファイルスキップ機能
+- 自動クリーンアップ
+
+### 4.4 復元ステータス管理
 
 **ステータスファイル**: `logs/restore_status_{request_id}.json`
 
 ```json
 {
   "request_id": "REQ-2025-001",
-  "request_date": "2025-07-15T10:30:00",
+  "request_date": "2025-07-16T10:30:00",
   "total_requests": 10,
   "restore_requests": [
     {
@@ -616,177 +356,252 @@ class RestoreProcessor:
       "bucket": "bucket",
       "key": "server/share/file.txt",
       "restore_status": "completed",
-      "restore_request_time": "2025-07-15T10:30:15",
-      "restore_completed_time": "2025-07-17T14:20:00",
-      "restore_expiry": "Fri, 22 Jul 2025 14:20:00 GMT"
+      "restore_request_time": "2025-07-16T10:30:15",
+      "restore_completed_time": "2025-07-18T14:20:00",
+      "restore_expiry": "Fri, 25 Jul 2025 14:20:00 GMT",
+      "download_status": "completed",
+      "destination_path": "C:\\restored\\file.txt",
+      "downloaded_size": 1024
     }
   ]
 }
 ```
 
-**ステータス値**:
+## 5. Streamlit アプリケーション設計
 
-- `requested`: 復元リクエスト送信済み
-- `already_in_progress`: 既に復元処理中
-- `pending`: 復元処理待機中
-- `in_progress`: 復元処理中
-- `completed`: 復元完了（ダウンロード可能）
-- `failed`: 復元失敗
-- `downloaded`: ダウンロード完了
+### 5.1 画面構成
 
-#### 5.3.4 S3 復元ステータス確認
+#### 5.1.1 メイン画面
 
-**API**: `s3_client.head_object(Bucket, Key)`
+- **ヘッダー**: アプリケーション名、現在日時
+- **検索フィルター**: 日付範囲、依頼者、処理状況
+- **履歴一覧**: ページネーション対応テーブル
+- **集計情報**: ファイル数、総サイズ等の統計
+- **エクスポート**: Excel/CSV ダウンロードボタン
 
-**Restore ヘッダー解析**:
+#### 5.1.2 検索・フィルタリング機能
 
 ```python
-# 復元処理中
-'ongoing-request="true"'
-
-# 復元完了
-'ongoing-request="false", expiry-date="Fri, 21 Dec 2012 00:00:00 GMT"'
-
-# 復元未開始
-None (Restoreヘッダーなし)
+# フィルター項目
+- 依頼日範囲（from_date, to_date）
+- 依頼者（社員番号）
+- ファイルパス（部分一致検索）
 ```
 
-#### 5.3.5 復元設定項目
+#### 5.1.3 データ表示項目
+
+- 依頼 ID
+- 依頼者
+- 依頼日時
+- 元ファイルパス（省略表示）
+- ファイルサイズ
+- アーカイブ日時
+
+### 5.2 機能詳細
+
+#### 5.2.1 履歴検索機能
+
+```sql
+-- 基本検索クエリ
+SELECT id, request_id, requester, request_date,
+       original_file_path, file_size, archive_date
+FROM archive_history
+WHERE request_date BETWEEN %s AND %s
+  AND requester LIKE %s
+ORDER BY request_date DESC
+LIMIT %s OFFSET %s;
+```
+
+#### 5.2.2 集計機能
+
+```sql
+-- 集計クエリ例
+SELECT
+    COUNT(*) as total_files,
+    SUM(file_size) as total_size,
+    COUNT(DISTINCT request_id) as total_requests
+FROM archive_history
+WHERE request_date BETWEEN %s AND %s;
+```
+
+#### 5.2.3 エクスポート機能
+
+- **Excel 形式**: `pandas.to_excel()`使用
+- **CSV 形式**: `pandas.to_csv()`使用
+- **ファイル名**: `archive_history_{YYYYMMDD_HHMMSS}.{xlsx|csv}`
+
+## 6. 設定管理
+
+### 6.1 共通設定ファイル
 
 ```json
 {
+  "aws": {
+    "region": "ap-northeast-1",
+    "s3_bucket": "your-archive-bucket",
+    "storage_class": "DEEP_ARCHIVE",
+    "vpc_endpoint_url": "https://bucket.vpce-xxx.s3.region.vpce.amazonaws.com"
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "archive_system",
+    "user": "postgres",
+    "password": "password",
+    "timeout": 30
+  },
+  "request": {
+    "requester": "12345678"
+  },
+  "file_server": {
+    "archived_suffix": "_archived",
+    "exclude_extensions": [".tmp", ".lock", ".bak"]
+  },
+  "processing": {
+    "max_file_size": 10737418240,
+    "chunk_size": 8388608,
+    "retry_count": 3
+  },
   "restore": {
-    "restore_tier": "Standard", // Standard/Expedited/Bulk
-    "restore_days": 7, // 復元後保持日数
-    "check_interval": 300, // ステータス確認間隔（秒）
-    "max_wait_time": 86400, // 最大待機時間（秒）
-    "download_retry_count": 3, // ダウンロードリトライ回数
-    "skip_existing_files": true, // 同名ファイルスキップ
-    "temp_download_directory": "temp_downloads" // 一時ダウンロード先
+    "restore_tier": "Standard",
+    "restore_days": 7,
+    "download_retry_count": 3,
+    "skip_existing_files": true,
+    "temp_download_directory": "temp_downloads"
+  },
+  "logging": {
+    "log_directory": "logs",
+    "log_level": "INFO"
   }
 }
 ```
 
-### 5.4 復元処理運用手順
+### 6.2 主要設定項目
 
-#### 5.4.1 標準的な復元フロー（2 段階実行）
+#### 6.2.1 アーカイブ設定
+
+- **storage_class**: 自動変換対応（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
+- **archived_suffix**: 空ファイルサフィックス
+- **exclude_extensions**: 除外拡張子リスト
+
+#### 6.2.2 復元設定
+
+- **restore_tier**: 復元速度ティア（Standard/Expedited/Bulk）
+- **restore_days**: 復元後保持日数（1-30 日）
+- **skip_existing_files**: 同名ファイルスキップ
+
+## 7. エラーハンドリング・ログ
+
+### 7.1 エラー分類
+
+| エラー種別             | アーカイブ | 復元 | 処理継続 | リトライ |
+| ---------------------- | ---------- | ---- | -------- | -------- |
+| CSV 読み込みエラー     | ✓          | ✓    | ×        | -        |
+| CSV 検証エラー         | ✓          | ✓    | ✓        | -        |
+| S3 接続エラー          | ✓          | ✓    | ×        | -        |
+| S3 操作エラー          | ✓          | ✓    | ✓        | ✓        |
+| ファイルアクセスエラー | ✓          | ✓    | ✓        | ×        |
+| データベース接続エラー | ✓          | ✓    | ✓        | ×        |
+
+### 7.2 ログレベル
+
+| レベル  | 用途         | 例                                                   |
+| ------- | ------------ | ---------------------------------------------------- |
+| DEBUG   | デバッグ情報 | S3 キー生成詳細、一時ファイル削除                    |
+| INFO    | 処理進捗     | ファイル収集完了、復元完了                           |
+| WARNING | 警告         | アップロード失敗（リトライ中）、同名ファイルスキップ |
+| ERROR   | エラー       | ディレクトリが存在しません、復元失敗                 |
+
+### 7.3 エラー CSV 出力
+
+#### 7.3.1 アーカイブエラー CSV
+
+- **CSV 検証エラー**: `logs/{元ファイル名}_csv_retry_{timestamp}.csv`
+- **アーカイブエラー**: `logs/{元ファイル名}_archive_retry_{timestamp}.csv`
+
+#### 7.3.2 復元エラー CSV
+
+- **復元依頼エラー**: `logs/{元ファイル名}_restore_errors_{timestamp}.csv`
+
+## 8. 運用・監視設計
+
+### 8.1 運用フロー
+
+#### 8.1.1 アーカイブ運用フロー
 
 ```bash
-# 1. 復元リクエスト送信（即座に完了）
-python restore_script_main.py restore_request.csv REQ-2025-001 --request-only
+# 1. アーカイブ処理実行
+python archive_script_main.py archive_request.csv REQ-2025-001
 
-# 2. 48時間後、ダウンロード実行（ステータス確認も自動実行）
-python restore_script_main.py restore_request.csv REQ-2025-001 --download-only
+# 2. エラー発生時の再実行
+python archive_script_main.py logs/archive_request_retry_*.csv REQ-2025-001-RETRY
 ```
 
-#### 5.4.2 復元進捗の確認方法
-
-**ステータスファイルで確認**:
+#### 8.1.2 復元運用フロー
 
 ```bash
-# ステータスファイルの内容確認
-cat logs/restore_status_REQ-2025-001.json
+# 1. 復元リクエスト送信
+python restore_script_main.py restore_request.csv REQ-RESTORE-001 --request-only
+
+# 2. 48時間後、ダウンロード実行
+python restore_script_main.py restore_request.csv REQ-RESTORE-001 --download-only
 ```
 
-**ログファイルで確認**:
+### 8.2 監視項目
+
+#### 8.2.1 処理監視
+
+- **処理時間**: 想定処理時間との比較
+- **成功率**: ファイル単位・依頼単位の成功率
+- **エラー傾向**: エラー種別・頻度の分析
+
+#### 8.2.2 リソース監視
+
+- **ディスク使用量**: ログファイル・一時ファイル
+- **メモリ使用量**: 大量ファイル処理時
+- **ネットワーク**: S3 転送速度
+
+### 8.3 ログローテーション
 
 ```bash
-# 最新のログファイル確認
-tail -f logs/restore_YYYYMMDD_HHMMSS.log
+# ログ保持期間: 30日
+find logs/ -name "*.log" -mtime +30 -delete
+
+# ログ圧縮: 7日経過
+find logs/ -name "*.log" -mtime +7 -exec gzip {} \;
 ```
 
-#### 5.4.3 部分的な復元完了時の動作
+## 9. セキュリティ設計
 
-- 一部ファイルが復元完了、一部が処理中の場合
-- `--download-only`実行時に完了分のみダウンロード
-- 未完了分は次回実行時に自動的に確認・ダウンロード
-
-```bash
-# 例：10ファイル中5ファイルが復元完了の場合
-python restore_script_main.py restore_request.csv REQ-2025-001 --download-only
-# → 5ファイルがダウンロードされ、残り5ファイルは次回に持ち越し
-
-# 翌日再実行（残り5ファイルの確認・ダウンロード）
-python restore_script_main.py restore_request.csv REQ-2025-001 --download-only
-```
-
-#### 5.4.2 エラー対応
-
-**CSV 検証エラー**:
-
-- `logs/{filename}_restore_errors_{timestamp}.csv` に詳細出力
-- 修正後に再実行
-
-**復元リクエストエラー**:
-
-- ログでエラー理由確認
-- IAM 権限・S3 接続確認
-
-**ダウンロードエラー**:
-
-- 復元期限切れの場合は再度リクエスト送信
-- 権限エラーの場合は復元先ディレクトリ確認
-
-**復元未完了の場合**:
-
-- `--download-only`実行時に「復元処理中」メッセージが表示
-- しばらく待ってから再実行（完了分のみ自動ダウンロード）
-
-## 6. 運用・監視設計
-
-### 6.1 ログ設計
-
-#### 6.1.1 ログレベル
-
-- **DEBUG**: デバッグ情報（ファイルのみ）
-- **INFO**: 処理進捗情報
-- **WARNING**: 警告（処理継続可能）
-- **ERROR**: エラー（個別処理失敗）
-- **CRITICAL**: 重大エラー（システム停止）
-
-#### 6.1.2 ログ出力先
-
-- **コンソール**: INFO レベル以上
-- **ログファイル**: DEBUG レベル以上
-- **ファイル名**: `logs/archive_{YYYYMMDD_HHMMSS}.log`
-
-#### 6.1.3 ログローテーション
-
-- **保持期間**: 30 日
-- **ファイルサイズ制限**: 100MB
-- **圧縮**: gzip 圧縮
-
-### 6.2 パフォーマンス考慮事項
-
-#### 6.2.1 想定処理規模
-
-- **月間依頼件数**: 100-200 件
-- **月間処理ファイル数**: 10,000-20,000 ファイル
-- **並行処理**: 現時点では実装しない（2 人 1 組運用）
-
-#### 6.2.2 最適化ポイント
-
-- データベースのコミット方式（ディレクトリ単位 vs 一括）
-- S3 アップロードのチャンクサイズ
-- ファイル収集時のメモリ使用量
-
-## 7. セキュリティ設計
-
-### 7.1 認証・認可
+### 9.1 認証・認可
 
 - **アクセス権限**: 運用管理者のみ
-- **依頼者権限**: 企業社員番号 7 桁による識別
+- **依頼者権限**: 企業社員番号 8 桁による識別
 - **ファイルアクセス**: 部署ごとに独立したファイルサーバ構成
 
-### 7.2 データ保護
+### 9.2 データ保護
 
 - **通信暗号化**: VPC エンドポイント経由の HTTPS 通信
 - **データベース接続**: SSL 接続（設定による）
 - **ログ保護**: 機密情報のマスキング
 
-## 8. 今後の拡張計画
+## 10. パフォーマンス設計
 
-### 8.1 短期拡張（3 ヶ月以内）
+### 10.1 処理能力
+
+- **想定ファイル数**: 10,000-20,000 ファイル/月
+- **最大ファイルサイズ**: 10GB（設定可能）
+- **並行処理**: なし（シーケンシャル処理）
+
+### 10.2 最適化ポイント
+
+- **S3 転送**: チャンクサイズ最適化
+- **データベース**: バッチ挿入・インデックス活用
+- **メモリ効率**: ファイル単位処理
+
+## 11. 今後の拡張計画
+
+### 11.1 短期拡張（3 ヶ月以内）
 
 - [x] CSV 検証エラー処理の改善（処理継続・エラー CSV 生成）
 - [x] S3 アップロード機能の実装（boto3、VPC エンドポイント対応）
@@ -794,128 +609,39 @@ python restore_script_main.py restore_request.csv REQ-2025-001 --download-only
 - [x] S3 パス構造の改善（サーバ名ベース）
 - [x] アーカイブ後処理の実装（空ファイル作成 → 元ファイル削除）
 - [x] データベース登録処理の実装（PostgreSQL、トランザクション管理）
-- [ ] 復元スクリプトの実装
-- [ ] 進捗確認機能の実装
+- [x] 復元スクリプトの基盤実装（CSV 読み込み・検証・DB 検索）
+- [x] 復元リクエスト送信機能の実装（S3 restore_object API）
+- [x] 復元ステータス確認機能の実装（S3 head_object API）
+- [x] 復元ステータス管理機能の実装（JSON 形式でのステータス保存・読み込み）
+- [x] 2 段階実行モードの実装（request-only/download-only）
+- [x] ダウンロード実行時の自動ステータス確認機能
+- [x] ダウンロード・配置機能の実装（同名ファイルスキップ・0 バイトファイル対応）
+- [x] 一時ファイル管理機能の実装（安全なダウンロード・クリーンアップ）
+- [x] 実機動作検証完了（0 バイトファイル、VPC エンドポイント通信等）
+- [ ] Streamlit アプリの実装
+- [ ] 単体テストコードの実装
 
-### 8.2 中期拡張（6 ヶ月以内）
+### 11.2 中期拡張（6 ヶ月以内）
 
 - [ ] 並行処理対応
 - [ ] パフォーマンス最適化
 - [ ] 監視・アラート機能
+- [ ] 進捗確認機能の実装
 
-### 8.3 長期拡張（1 年以内）
+### 11.3 長期拡張（1 年以内）
 
-- [ ] Web UI での依頼受付機能
+- [ ] WebUI での依頼受付機能
 - [ ] 自動スケジューリング機能
 - [ ] レポート機能の拡充
 
-## 9. 運用手順書
+## 12. 運用手順書
 
-### 9.1 アーカイブ処理手順
+### 12.1 アーカイブ処理手順
 
 ```bash
 # 1. 設定ファイル確認
 python -m json.tool config/archive_config.json
 
 # 2. CSVファイル準備確認
-head -5 /path/to/archive_request.csv
-
-# 3. アーカイブ処理実行
-python archive_script_main.py /path/to/archive_request.csv REQ-YYYY-XXX
-
-# 4. 処理結果確認
-ls -la logs/
-tail -f logs/archive_YYYYMMDD_HHMMSS.log
-
-# 5. エラー発生時の再実行
-python archive_script_main.py logs/archive_request_archive_retry_YYYYMMDD_HHMMSS.csv REQ-YYYY-XXX-RETRY
+head -5
 ```
-
-### 9.2 エラー対応フロー
-
-```
-1. ログファイルでエラー詳細を確認
-2. エラー種別に応じた対応
-   - CSV検証エラー: パス修正後、再試行用CSVで再実行
-   - アーカイブエラー: 権限・接続確認後、再試行用CSVで再実行
-3. 再実行用CSVは logs/ ディレクトリに自動生成される
-4. エラー統計でエラー理由の分布を確認
-```
-
-### 9.3 S3 パス構造の確認
-
-```bash
-# アップロード結果の確認
-aws s3 ls s3://bucket-name/server-name/ --recursive
-
-# 期待されるパス構造
-s3://bucket/amznfsxbeak7dyp/share/project1/file.txt
-s3://bucket/local_c/temp/file.txt
-```
-
-### 9.4 トラブルシューティング
-
-#### 9.4.1 よくあるエラーと対処法
-
-- **CSV 読み込みエラー**: 文字エンコーディング確認（UTF-8-SIG 推奨）
-- **ストレージクラスエラー**: `GLACIER_DEEP_ARCHIVE` → `DEEP_ARCHIVE` に自動変換されるか確認
-- **S3 接続エラー**: VPC エンドポイント・認証情報確認
-- **権限エラー**: IAM ロールに`s3:PutObject`権限があるか確認
-- **データベース接続エラー**: 接続設定・ネットワーク確認
-- **データベース登録エラー**: requester（社員番号）が 8 桁か確認
-- **文字エンコーディングエラー**: psql で`set PGCLIENTENCODING=UTF8`または pgAdmin 使用
-- **ファイルアクセスエラー**: 権限・パス存在確認
-
-#### 9.4.2 ログの確認ポイント
-
-```
-# 成功パターン
-✓ アップロード成功: server/share/project1/file.txt
-✓ アーカイブ後処理完了: \\server\share\file.txt
-データベース挿入完了: 2件
-
-# 失敗パターン
-✗ アップロード失敗: \\server\share\file.txt - AccessDenied
-データベース登録エラー: 値は型character varying(8)としては長すぎます
-```
-
-#### 9.4.3 データベース確認コマンド
-
-```sql
--- 基本確認（文字化け回避）
-SELECT id, request_id, requester, file_size, created_at
-FROM archive_history ORDER BY created_at DESC LIMIT 5;
-
--- 件数確認
-SELECT COUNT(*) FROM archive_history;
-
--- 依頼ID別集計
-SELECT request_id, COUNT(*), SUM(file_size)
-FROM archive_history GROUP BY request_id;
-```
-
-## 10. 更新履歴
-
-| 日付       | バージョン | 更新内容                                      | 更新者             |
-| ---------- | ---------- | --------------------------------------------- | ------------------ |
-| 2025-07-14 | 1.0        | 初版作成                                      | システム開発チーム |
-| 2025-07-15 | 1.1        | CSV 検証エラー処理改善、S3 アップロード実装   | システム開発チーム |
-| 2025-07-15 | 1.2        | エラー CSV 出力先変更、再試行フォーマット実装 | システム開発チーム |
-| 2025-07-15 | 1.3        | アーカイブ後処理実装完了                      | システム開発チーム |
-| 2025-07-15 | 1.4        | データベース登録処理実装完了                  | システム開発チーム |
-
-### 主要な変更内容（v1.4）
-
-- データベース登録処理の実装完了
-  - PostgreSQL 接続・トランザクション管理
-  - アーカイブ完了ファイルのみ登録
-  - S3 完全 URL 形式での保存
-  - バッチ挿入による効率化
-- データベーススキーマの 8 桁社員番号対応
-- request_id 取得方法の改善（コマンドライン引数優先）
-- 設定ファイルの簡素化（request_id を削除）
-- 文字エンコーディング問題の対処法追加
-
----
-
-**注意**: この設計書は実装の進捗に応じて随時更新されます。
