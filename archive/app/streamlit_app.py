@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-アーカイブ履歴閲覧 Streamlit アプリケーション
+アーカイブ履歴閲覧 Streamlit アプリケーション（改良版）
 """
 
 import streamlit as st
@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import io
 import base64
+from sqlalchemy import create_engine
+import warnings
+
+# Pandas警告を抑制
+warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
 
 # ページ設定
 st.set_page_config(
@@ -53,6 +58,17 @@ st.markdown("""
         border: 1px solid #e0e0e0;
         border-radius: 0.25rem;
     }
+    .reset-button {
+        background-color: #6c757d;
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+    }
+    .reset-button:hover {
+        background-color: #545b62;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,7 +77,17 @@ class ArchiveHistoryApp:
     
     def __init__(self):
         self.config = self.load_config()
-        self.db_connection = None
+        self.engine = None
+        
+        # セッション状態の初期化
+        if 'search_executed' not in st.session_state:
+            st.session_state.search_executed = False
+        if 'last_search_params' not in st.session_state:
+            st.session_state.last_search_params = {}
+        if 'search_results' not in st.session_state:
+            st.session_state.search_results = pd.DataFrame()
+        if 'search_stats' not in st.session_state:
+            st.session_state.search_stats = {}
         
     def load_config(self) -> Dict:
         """設定ファイル読み込み"""
@@ -72,29 +98,43 @@ class ArchiveHistoryApp:
             return config
         except FileNotFoundError:
             st.error(f"設定ファイルが見つかりません: {config_path}")
+            st.error("config/archive_config.jsonを作成してください。")
             st.stop()
         except json.JSONDecodeError as e:
             st.error(f"設定ファイルの形式が正しくありません: {e}")
             st.stop()
     
-    def get_database_connection(self):
-        """データベース接続を取得"""
-        if self.db_connection is None:
+    def get_database_engine(self):
+        """SQLAlchemy エンジンを取得（pandas警告対策）"""
+        if self.engine is None:
             try:
                 db_config = self.config.get('database', {})
-                self.db_connection = psycopg2.connect(
-                    host=db_config.get('host', 'localhost'),
-                    port=db_config.get('port', 5432),
-                    database=db_config.get('database', 'archive_system'),
-                    user=db_config.get('user', 'postgres'),
-                    password=db_config.get('password', ''),
-                    connect_timeout=db_config.get('timeout', 30)
+                
+                # PostgreSQL接続文字列の構築
+                connection_string = (
+                    f"postgresql://{db_config.get('user', 'postgres')}:"
+                    f"{db_config.get('password', '')}@"
+                    f"{db_config.get('host', 'localhost')}:"
+                    f"{db_config.get('port', 5432)}/"
+                    f"{db_config.get('database', 'archive_system')}"
                 )
-                return self.db_connection
+                
+                self.engine = create_engine(connection_string)
+                
+                # 接続テスト
+                with self.engine.connect() as conn:
+                    conn.execute("SELECT 1")
+                
+                return self.engine
+                
+            except ImportError:
+                st.error("SQLAlchemyがインストールされていません。pip install sqlalchemy を実行してください。")
+                st.stop()
             except Exception as e:
                 st.error(f"データベース接続エラー: {str(e)}")
+                st.error("データベース設定を確認してください。")
                 st.stop()
-        return self.db_connection
+        return self.engine
     
     def search_archive_history(self, 
                              start_date: datetime.date,
@@ -106,7 +146,7 @@ class ArchiveHistoryApp:
                              offset: int = 0) -> pd.DataFrame:
         """アーカイブ履歴検索"""
         try:
-            conn = self.get_database_connection()
+            engine = self.get_database_engine()
             
             # 基本クエリ
             query = """
@@ -121,31 +161,31 @@ class ArchiveHistoryApp:
                     file_size,
                     created_at
                 FROM archive_history 
-                WHERE request_date::date BETWEEN %s AND %s
+                WHERE request_date::date BETWEEN %(start_date)s AND %(end_date)s
             """
-            params = [start_date, end_date]
+            params = {'start_date': start_date, 'end_date': end_date}
             
             # 依頼IDフィルター
             if request_id.strip():
-                query += " AND request_id ILIKE %s"
-                params.append(f"%{request_id.strip()}%")
+                query += " AND request_id ILIKE %(request_id)s"
+                params['request_id'] = f"%{request_id.strip()}%"
             
             # 依頼者フィルター
             if requester.strip():
-                query += " AND requester LIKE %s"
-                params.append(f"%{requester.strip()}%")
+                query += " AND requester LIKE %(requester)s"
+                params['requester'] = f"%{requester.strip()}%"
             
             # ファイルパスフィルター
             if file_path.strip():
-                query += " AND original_file_path ILIKE %s"
-                params.append(f"%{file_path.strip()}%")
+                query += " AND original_file_path ILIKE %(file_path)s"
+                params['file_path'] = f"%{file_path.strip()}%"
             
             # ソート・制限
-            query += " ORDER BY request_date DESC LIMIT %s OFFSET %s"
-            params.extend([limit, offset])
+            query += " ORDER BY request_date DESC LIMIT %(limit)s OFFSET %(offset)s"
+            params.update({'limit': limit, 'offset': offset})
             
-            # 実行
-            df = pd.read_sql_query(query, conn, params=params)
+            # 実行（SQLAlchemy engine使用でpandas警告回避）
+            df = pd.read_sql_query(query, engine, params=params)
             
             if not df.empty:
                 # 日時列の変換
@@ -175,7 +215,7 @@ class ArchiveHistoryApp:
                       file_path: str = "") -> Dict:
         """統計情報取得"""
         try:
-            conn = self.get_database_connection()
+            engine = self.get_database_engine()
             
             # 基本クエリ
             query = """
@@ -188,27 +228,26 @@ class ArchiveHistoryApp:
                     MIN(request_date) as first_archive,
                     MAX(request_date) as last_archive
                 FROM archive_history 
-                WHERE request_date::date BETWEEN %s AND %s
+                WHERE request_date::date BETWEEN %(start_date)s AND %(end_date)s
             """
-            params = [start_date, end_date]
+            params = {'start_date': start_date, 'end_date': end_date}
             
             # フィルター条件追加
             if request_id.strip():
-                query += " AND request_id ILIKE %s"
-                params.append(f"%{request_id.strip()}%")
+                query += " AND request_id ILIKE %(request_id)s"
+                params['request_id'] = f"%{request_id.strip()}%"
                 
             if requester.strip():
-                query += " AND requester LIKE %s"
-                params.append(f"%{requester.strip()}%")
+                query += " AND requester LIKE %(requester)s"
+                params['requester'] = f"%{requester.strip()}%"
             
             if file_path.strip():
-                query += " AND original_file_path ILIKE %s"
-                params.append(f"%{file_path.strip()}%")
+                query += " AND original_file_path ILIKE %(file_path)s"
+                params['file_path'] = f"%{file_path.strip()}%"
             
             # 実行
-            with conn.cursor() as cursor:
-                cursor.execute(query, params)
-                result = cursor.fetchone()
+            with engine.connect() as conn:
+                result = conn.execute(query, params).fetchone()
                 
                 if result:
                     return {
@@ -238,13 +277,12 @@ class ArchiveHistoryApp:
     def get_requester_list(self) -> List[str]:
         """依頼者リスト取得"""
         try:
-            conn = self.get_database_connection()
+            engine = self.get_database_engine()
             query = "SELECT DISTINCT requester FROM archive_history ORDER BY requester"
             
-            with conn.cursor() as cursor:
-                cursor.execute(query)
-                results = cursor.fetchall()
-                return [row[0] for row in results]
+            with engine.connect() as conn:
+                result = conn.execute(query)
+                return [row[0] for row in result]
                 
         except Exception as e:
             st.error(f"依頼者リスト取得エラー: {str(e)}")
@@ -329,6 +367,18 @@ class ArchiveHistoryApp:
         current_time = datetime.datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")
         st.markdown(f"<div style='text-align: center; color: #666; margin-bottom: 2rem;'>最終更新: {current_time}</div>", 
                    unsafe_allow_html=True)
+        
+        # リセットボタン（検索実行後に表示）
+        if st.session_state.search_executed:
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col2:
+                if st.button("🔄 初期画面に戻る", key="reset_button", help="検索結果をクリアして初期画面に戻ります"):
+                    # セッション状態をリセット
+                    st.session_state.search_executed = False
+                    st.session_state.search_results = pd.DataFrame()
+                    st.session_state.search_stats = {}
+                    st.session_state.last_search_params = {}
+                    st.experimental_rerun()
     
     def render_sidebar_filters(self):
         """サイドバーフィルター描画"""
@@ -344,20 +394,23 @@ class ArchiveHistoryApp:
         start_date = st.sidebar.date_input(
             "開始日",
             value=start_date,
-            max_value=end_date
+            max_value=end_date,
+            key="start_date"
         )
         
         end_date = st.sidebar.date_input(
             "終了日", 
             value=end_date,
-            min_value=start_date
+            min_value=start_date,
+            key="end_date"
         )
         
         # 依頼ID検索
         st.sidebar.subheader("依頼ID")
         request_id = st.sidebar.text_input(
             "依頼ID（部分一致）",
-            placeholder="例: REQ-2025-001"
+            placeholder="例: REQ-2025-001",
+            key="request_id"
         )
         
         # 依頼者フィルター
@@ -368,16 +421,21 @@ class ArchiveHistoryApp:
             selected_requester = st.sidebar.selectbox(
                 "依頼者選択",
                 options=[""] + requester_list,
-                index=0
+                index=0,
+                key="requester_select"
             )
         else:
-            selected_requester = st.sidebar.text_input("依頼者（社員番号）")
+            selected_requester = st.sidebar.text_input(
+                "依頼者（社員番号）",
+                key="requester_text"
+            )
         
         # ファイルパス検索
         st.sidebar.subheader("ファイル検索")
         file_path = st.sidebar.text_input(
             "ファイルパス（部分一致）",
-            placeholder="例: project1, .txt, \\\\server\\share"
+            placeholder="例: project1, .txt, \\\\server\\share",
+            key="file_path"
         )
         
         # 表示件数
@@ -385,7 +443,8 @@ class ArchiveHistoryApp:
         limit = st.sidebar.selectbox(
             "表示件数",
             options=[100, 500, 1000, 2000],
-            index=2
+            index=2,
+            key="limit"
         )
         
         return start_date, end_date, request_id, selected_requester, file_path, limit
@@ -397,7 +456,7 @@ class ArchiveHistoryApp:
             
         st.subheader("📊 統計情報")
         
-        # メトリクス表示（3列に変更）
+        # メトリクス表示（3列）
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -448,6 +507,7 @@ class ArchiveHistoryApp:
         """データテーブル描画"""
         if df.empty:
             st.warning("📭 検索条件に一致するデータが見つかりません。")
+            st.info("💡 検索条件を変更して再度お試しください。")
             return
         
         st.subheader(f"📋 アーカイブ履歴 ({len(df):,}件)")
@@ -485,7 +545,8 @@ class ArchiveHistoryApp:
             selected_indices = st.multiselect(
                 "詳細を表示するレコードを選択（依頼IDで選択）",
                 options=df['request_id'].unique(),
-                max_selections=5
+                max_selections=5,
+                key="detail_select"
             )
             
             if selected_indices:
@@ -535,6 +596,44 @@ class ArchiveHistoryApp:
                 st.markdown(csv_link, unsafe_allow_html=True)
                 st.caption("CSVファイル（UTF-8-SIG）形式でダウンロード")
     
+    def render_initial_screen(self):
+        """初期画面の描画"""
+        st.info("🔍 **検索条件を設定して「検索実行」ボタンを押してください**")
+        
+        # システム情報
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 📋 使用方法")
+            st.markdown("""
+            1. **期間指定**: 検索したい期間を選択
+            2. **依頼ID**: 特定の依頼IDで絞り込み（任意）
+            3. **依頼者**: 社員番号で絞り込み（任意）
+            4. **ファイル検索**: ファイルパスで絞り込み（任意）
+            5. **検索実行**: ボタンを押して検索開始
+            """)
+        
+        with col2:
+            st.markdown("### ⚡ 機能一覧")
+            st.markdown("""
+            - 📊 **統計情報表示**: ファイル数・サイズ・依頼件数
+            - 🔍 **詳細検索**: 複数条件での絞り込み検索
+            - 📥 **データエクスポート**: Excel・CSV形式でダウンロード
+            - 🔄 **初期画面リセット**: ワンクリックで検索条件クリア
+            """)
+        
+        st.markdown("### ⚠️ セキュリティについて")
+        st.warning("検索実行前はデータが表示されません。これにより、不要な情報の漏洩を防いでいます。")
+        
+        # データベース接続状態確認
+        try:
+            engine = self.get_database_engine()
+            with engine.connect() as conn:
+                conn.execute("SELECT COUNT(*) FROM archive_history")
+            st.success("✅ データベース接続: 正常")
+        except Exception as e:
+            st.error(f"❌ データベース接続: エラー - {str(e)}")
+    
     def run(self):
         """メインアプリケーション実行"""
         try:
@@ -545,77 +644,102 @@ class ArchiveHistoryApp:
             start_date, end_date, request_id, requester, file_path, limit = self.render_sidebar_filters()
             
             # 検索実行ボタン
-            search_executed = st.sidebar.button("🔍 検索実行", type="primary")
+            search_button = st.sidebar.button("🔍 検索実行", type="primary", key="search_button")
             
-            # 初期表示メッセージ
-            if not search_executed:
-                st.info("🔍 **検索条件を設定して「検索実行」ボタンを押してください**")
-                st.markdown("### 📋 使用方法")
-                st.markdown("""
-                1. **期間指定**: 検索したい期間を選択
-                2. **依頼ID**: 特定の依頼IDで絞り込み（任意）
-                3. **依頼者**: 社員番号で絞り込み（任意）
-                4. **ファイル検索**: ファイルパスで絞り込み（任意）
-                5. **検索実行**: ボタンを押して検索開始
-                """)
+            # 検索実行またはキャッシュされた結果表示
+            if search_button:
+                # 検索パラメータを保存
+                current_params = {
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'request_id': request_id,
+                    'requester': requester,
+                    'file_path': file_path,
+                    'limit': limit
+                }
                 
-                st.markdown("### ⚠️ セキュリティについて")
-                st.warning("検索実行前はデータが表示されません。これにより、不要な情報の漏洩を防いでいます。")
-                return
-            
-            # データ検索（検索実行時のみ）
-            with st.spinner("データを検索中..."):
-                df = self.search_archive_history(
-                    start_date=start_date,
-                    end_date=end_date,
-                    request_id=request_id,
-                    requester=requester,
-                    file_path=file_path,
-                    limit=limit
-                )
+                # 検索実行
+                with st.spinner("データを検索中..."):
+                    df = self.search_archive_history(
+                        start_date=start_date,
+                        end_date=end_date,
+                        request_id=request_id,
+                        requester=requester,
+                        file_path=file_path,
+                        limit=limit
+                    )
+                    
+                    stats = self.get_statistics(
+                        start_date=start_date,
+                        end_date=end_date,
+                        request_id=request_id,
+                        requester=requester,
+                        file_path=file_path
+                    )
                 
-                stats = self.get_statistics(
-                    start_date=start_date,
-                    end_date=end_date,
-                    request_id=request_id,
-                    requester=requester,
-                    file_path=file_path
-                )
+                # セッション状態更新
+                st.session_state.search_executed = True
+                st.session_state.search_results = df
+                st.session_state.search_stats = stats
+                st.session_state.last_search_params = current_params
+                
+                st.experimental_rerun()
             
-            # 統計情報表示
-            self.render_statistics(stats)
-            
-            # データテーブル表示
-            self.render_data_table(df)
-            
-            # エクスポート機能（検索実行後のみ表示）
-            if not df.empty:
-                self.render_export_section(df)
+            # 結果表示（検索実行後またはキャッシュがある場合）
+            if st.session_state.search_executed:
+                if not st.session_state.search_results.empty:
+                    # 統計情報表示
+                    self.render_statistics(st.session_state.search_stats)
+                    
+                    # データテーブル表示
+                    self.render_data_table(st.session_state.search_results)
+                    
+                    # エクスポート機能
+                    self.render_export_section(st.session_state.search_results)
+                    
+                else:
+                    # 検索結果が空の場合
+                    st.warning("📭 検索条件に一致するデータが見つかりません。")
+                    st.info("💡 検索条件を変更して再度お試しください。")
+                    
+                    # 検索パラメータ表示
+                    if st.session_state.last_search_params:
+                        with st.expander("🔍 実行した検索条件"):
+                            params = st.session_state.last_search_params
+                            st.write(f"- **期間**: {params['start_date']} ～ {params['end_date']}")
+                            if params['request_id']:
+                                st.write(f"- **依頼ID**: {params['request_id']}")
+                            if params['requester']:
+                                st.write(f"- **依頼者**: {params['requester']}")
+                            if params['file_path']:
+                                st.write(f"- **ファイルパス**: {params['file_path']}")
+                            st.write(f"- **表示件数**: {params['limit']}")
             else:
-                st.info("💡 検索結果が見つかった場合、ここにエクスポート機能が表示されます。")
+                # 初期画面表示
+                self.render_initial_screen()
             
             # フッター
             st.markdown("---")
+            footer_text = "アーカイブ履歴管理システム v1.0"
+            if st.session_state.search_executed and st.session_state.last_search_params:
+                params = st.session_state.last_search_params
+                footer_text += f" | 検索期間: {params['start_date']} ～ {params['end_date']}"
+            
             st.markdown(
-                "<div style='text-align: center; color: #666; font-size: 0.8rem;'>"
-                "アーカイブ履歴管理システム v1.0 | "
-                f"検索期間: {start_date.strftime('%Y-%m-%d')} ～ {end_date.strftime('%Y-%m-%d')}"
-                "</div>",
+                f"<div style='text-align: center; color: #666; font-size: 0.8rem;'>{footer_text}</div>",
                 unsafe_allow_html=True
             )
             
         except Exception as e:
             st.error(f"アプリケーションエラー: {str(e)}")
             st.exception(e)
-        
-        finally:
-            # データベース接続クローズ
-            if self.db_connection:
-                try:
-                    self.db_connection.close()
-                    self.db_connection = None
-                except Exception:
-                    pass
+            
+            # エラー時のリセットオプション
+            if st.button("🔄 アプリケーションをリセット", key="error_reset"):
+                # セッション状態をリセット
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.experimental_rerun()
 
 def main():
     """メイン関数"""
