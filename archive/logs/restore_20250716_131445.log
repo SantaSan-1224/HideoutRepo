@@ -1,0 +1,32 @@
+2025-07-16 13:14:45,699 - restore_processor - INFO - ログファイル: logs\restore_20250716_131445.log
+2025-07-16 13:14:45,700 - restore_processor - INFO - 復元処理開始 - Request ID: REQ-RESTORE-TEST-001, Mode: download
+2025-07-16 13:14:45,702 - restore_processor - INFO - === ダウンロード実行モード ===
+2025-07-16 13:14:45,704 - restore_processor - INFO - 復元ステータス読み込み完了: 1件
+2025-07-16 13:14:45,704 - restore_processor - INFO - 復元ステータスを確認しています...
+2025-07-16 13:14:45,704 - restore_processor - INFO - 復元完了確認開始
+2025-07-16 13:14:45,706 - restore_processor - INFO - 復元確認対象ファイルがありません
+2025-07-16 13:14:45,706 - restore_processor - INFO - 復元完了ファイル: 1件をダウンロードします
+2025-07-16 13:14:45,707 - restore_processor - INFO - ファイルダウンロード・配置開始
+2025-07-16 13:14:45,707 - restore_processor - INFO - ダウンロード対象ファイル数: 1件
+2025-07-16 13:14:46,028 - restore_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-07-16 13:14:46,340 - restore_processor - INFO - S3クライアント初期化成功
+2025-07-16 13:14:46,340 - restore_processor - INFO - 一時ダウンロード先: temp_downloads
+2025-07-16 13:14:46,342 - restore_processor - INFO - 同名ファイルスキップ: True
+2025-07-16 13:14:46,342 - restore_processor - INFO - [1/1] ダウンロード処理中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt
+2025-07-16 13:14:46,711 - restore_processor - INFO - ✓ ダウンロード完了: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project1\test.txt -> \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\project2\test.txt
+2025-07-16 13:14:46,712 - restore_processor - WARNING - 一時ファイル削除エラー: [WinError 2] The system cannot find the file specified: 'temp_downloads\\20250716_131446_test.txt'
+2025-07-16 13:14:46,714 - restore_processor - INFO - ファイルダウンロード・配置完了
+2025-07-16 13:14:46,714 - restore_processor - INFO -   - 成功: 1件
+2025-07-16 13:14:46,715 - restore_processor - INFO -   - スキップ: 0件
+2025-07-16 13:14:46,715 - restore_processor - INFO -   - 失敗: 0件
+2025-07-16 13:14:46,718 - restore_processor - INFO - 復元ステータス保存: logs\restore_status_REQ-RESTORE-TEST-001.json
+2025-07-16 13:14:46,719 - restore_processor - INFO - ダウンロード処理完了
+2025-07-16 13:14:46,719 - restore_processor - INFO -   - ダウンロード成功: 1件
+2025-07-16 13:14:46,719 - restore_processor - INFO -   - スキップ: 0件
+2025-07-16 13:14:46,720 - restore_processor - INFO - === 復元処理統計 ===
+2025-07-16 13:14:46,720 - restore_processor - INFO - 処理時間: 0:00:01.019981
+2025-07-16 13:14:46,721 - restore_processor - INFO - CSV検証エラー数: 0
+2025-07-16 13:14:46,721 - restore_processor - INFO - 総復元依頼数: 1
+2025-07-16 13:14:46,721 - restore_processor - INFO - 復元リクエスト送信数: 0
+2025-07-16 13:14:46,722 - restore_processor - INFO - 復元完了数: 1
+2025-07-16 13:14:46,722 - restore_processor - INFO - 失敗数: 0
