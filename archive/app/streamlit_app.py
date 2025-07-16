@@ -99,6 +99,7 @@ class ArchiveHistoryApp:
     def search_archive_history(self, 
                              start_date: datetime.date,
                              end_date: datetime.date,
+                             request_id: str = "",
                              requester: str = "",
                              file_path: str = "",
                              limit: int = 1000,
@@ -123,6 +124,11 @@ class ArchiveHistoryApp:
                 WHERE request_date::date BETWEEN %s AND %s
             """
             params = [start_date, end_date]
+            
+            # 依頼IDフィルター
+            if request_id.strip():
+                query += " AND request_id ILIKE %s"
+                params.append(f"%{request_id.strip()}%")
             
             # 依頼者フィルター
             if requester.strip():
@@ -164,6 +170,7 @@ class ArchiveHistoryApp:
     def get_statistics(self, 
                       start_date: datetime.date,
                       end_date: datetime.date,
+                      request_id: str = "",
                       requester: str = "",
                       file_path: str = "") -> Dict:
         """統計情報取得"""
@@ -176,7 +183,6 @@ class ArchiveHistoryApp:
                     COUNT(*) as total_files,
                     SUM(file_size) as total_size,
                     COUNT(DISTINCT request_id) as total_requests,
-                    COUNT(DISTINCT requester) as total_requesters,
                     AVG(file_size) as avg_file_size,
                     MAX(file_size) as max_file_size,
                     MIN(request_date) as first_archive,
@@ -187,6 +193,10 @@ class ArchiveHistoryApp:
             params = [start_date, end_date]
             
             # フィルター条件追加
+            if request_id.strip():
+                query += " AND request_id ILIKE %s"
+                params.append(f"%{request_id.strip()}%")
+                
             if requester.strip():
                 query += " AND requester LIKE %s"
                 params.append(f"%{requester.strip()}%")
@@ -205,18 +215,16 @@ class ArchiveHistoryApp:
                         'total_files': result[0] or 0,
                         'total_size': result[1] or 0,
                         'total_requests': result[2] or 0,
-                        'total_requesters': result[3] or 0,
-                        'avg_file_size': result[4] or 0,
-                        'max_file_size': result[5] or 0,
-                        'first_archive': result[6],
-                        'last_archive': result[7]
+                        'avg_file_size': result[3] or 0,
+                        'max_file_size': result[4] or 0,
+                        'first_archive': result[5],
+                        'last_archive': result[6]
                     }
                 else:
                     return {
                         'total_files': 0,
                         'total_size': 0,
                         'total_requests': 0,
-                        'total_requesters': 0,
                         'avg_file_size': 0,
                         'max_file_size': 0,
                         'first_archive': None,
@@ -345,6 +353,13 @@ class ArchiveHistoryApp:
             min_value=start_date
         )
         
+        # 依頼ID検索
+        st.sidebar.subheader("依頼ID")
+        request_id = st.sidebar.text_input(
+            "依頼ID（部分一致）",
+            placeholder="例: REQ-2025-001"
+        )
+        
         # 依頼者フィルター
         st.sidebar.subheader("依頼者")
         requester_list = self.get_requester_list()
@@ -373,7 +388,7 @@ class ArchiveHistoryApp:
             index=2
         )
         
-        return start_date, end_date, selected_requester, file_path, limit
+        return start_date, end_date, request_id, selected_requester, file_path, limit
     
     def render_statistics(self, stats: Dict):
         """統計情報描画"""
@@ -382,8 +397,8 @@ class ArchiveHistoryApp:
             
         st.subheader("📊 統計情報")
         
-        # メトリクス表示
-        col1, col2, col3, col4 = st.columns(4)
+        # メトリクス表示（3列に変更）
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.markdown('<div class="metric-container success-metric">', unsafe_allow_html=True)
@@ -409,15 +424,6 @@ class ArchiveHistoryApp:
                 label="依頼件数",
                 value=f"{stats['total_requests']:,}",
                 help="アーカイブ依頼の総数"
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        with col4:
-            st.markdown('<div class="metric-container info-metric">', unsafe_allow_html=True)
-            st.metric(
-                label="依頼者数",
-                value=f"{stats['total_requesters']:,}",
-                help="アーカイブを依頼した人数"
             )
             st.markdown('</div>', unsafe_allow_html=True)
         
@@ -536,17 +542,33 @@ class ArchiveHistoryApp:
             self.render_header()
             
             # サイドバーフィルター
-            start_date, end_date, requester, file_path, limit = self.render_sidebar_filters()
+            start_date, end_date, request_id, requester, file_path, limit = self.render_sidebar_filters()
             
             # 検索実行ボタン
-            if st.sidebar.button("🔍 検索実行", type="primary"):
-                st.rerun()
+            search_executed = st.sidebar.button("🔍 検索実行", type="primary")
             
-            # データ検索
+            # 初期表示メッセージ
+            if not search_executed:
+                st.info("🔍 **検索条件を設定して「検索実行」ボタンを押してください**")
+                st.markdown("### 📋 使用方法")
+                st.markdown("""
+                1. **期間指定**: 検索したい期間を選択
+                2. **依頼ID**: 特定の依頼IDで絞り込み（任意）
+                3. **依頼者**: 社員番号で絞り込み（任意）
+                4. **ファイル検索**: ファイルパスで絞り込み（任意）
+                5. **検索実行**: ボタンを押して検索開始
+                """)
+                
+                st.markdown("### ⚠️ セキュリティについて")
+                st.warning("検索実行前はデータが表示されません。これにより、不要な情報の漏洩を防いでいます。")
+                return
+            
+            # データ検索（検索実行時のみ）
             with st.spinner("データを検索中..."):
                 df = self.search_archive_history(
                     start_date=start_date,
                     end_date=end_date,
+                    request_id=request_id,
                     requester=requester,
                     file_path=file_path,
                     limit=limit
@@ -555,6 +577,7 @@ class ArchiveHistoryApp:
                 stats = self.get_statistics(
                     start_date=start_date,
                     end_date=end_date,
+                    request_id=request_id,
                     requester=requester,
                     file_path=file_path
                 )
@@ -565,8 +588,11 @@ class ArchiveHistoryApp:
             # データテーブル表示
             self.render_data_table(df)
             
-            # エクスポート機能
-            self.render_export_section(df)
+            # エクスポート機能（検索実行後のみ表示）
+            if not df.empty:
+                self.render_export_section(df)
+            else:
+                st.info("💡 検索結果が見つかった場合、ここにエクスポート機能が表示されます。")
             
             # フッター
             st.markdown("---")
