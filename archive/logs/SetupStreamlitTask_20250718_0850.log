@@ -1,0 +1,47 @@
+PS C:\temp\archive\archive_system> Get-ExecutionPolicy
+RemoteSigned
+PS C:\temp\archive\archive_system> .\SetupStreamlitTask.ps1
+Setting up Streamlit service task...
+Removing existing task (if exists)...
+Existing task removed successfully
+Creating startup task...
+
+TaskPath                                       TaskName                          State
+--------                                       --------                          -----
+\                                              ArchiveHistoryStreamlitService    Ready
+Startup task created successfully: ArchiveHistoryStreamlitService
+Creating stop task...
+\                                              ArchiveHistoryStreamlitService... Ready
+Stop task created successfully: ArchiveHistoryStreamlitServiceStop
+
+========================================
+Task Setup Completed Successfully!
+========================================
+
+Tasks created:
+  - Startup task: ArchiveHistoryStreamlitService
+  - Stop task: ArchiveHistoryStreamlitServiceStop
+
+Management commands:
+  Start:  Start-ScheduledTask -TaskName 'ArchiveHistoryStreamlitService'
+  Stop:   Stop-ScheduledTask -TaskName 'ArchiveHistoryStreamlitService'
+  Status: Get-ScheduledTask -TaskName 'ArchiveHistoryStreamlitService'
+
+Next steps:
+1. Create StreamlitService.ps1 script
+2. Test the service:
+   Start-ScheduledTask -TaskName 'ArchiveHistoryStreamlitService'
+3. Check status:
+   Get-ScheduledTask -TaskName 'ArchiveHistoryStreamlitService'
+
+
+PS C:\temp\archive\archive_system>
+PS C:\temp\archive\archive_system> Start-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
+PS C:\temp\archive\archive_system> Get-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
+
+TaskPath                                       TaskName                          State
+--------                                       --------                          -----
+\                                              ArchiveHistoryStreamlitService    Ready
+
+
+PS C:\temp\archive\archive_system>
