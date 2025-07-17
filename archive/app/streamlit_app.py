@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-アーカイブ履歴閲覧 Streamlit アプリケーション（改良版）
+アーカイブ履歴閲覧 Streamlit アプリケーション（最終版）
+全ての修正を反映した完全動作版
 """
 
-import streamlit as st
-import pandas as pd
-import psycopg2
-import json
+import base64
 import datetime
+import io
+import json
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import io
-import base64
-from sqlalchemy import create_engine
-import warnings
+
+import pandas as pd
+import psycopg2
+import streamlit as st
+from sqlalchemy import create_engine, text
 
 # Pandas警告を抑制
 warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
@@ -123,7 +125,7 @@ class ArchiveHistoryApp:
                 
                 # 接続テスト
                 with self.engine.connect() as conn:
-                    conn.execute("SELECT 1")
+                    conn.execute(text("SELECT 1"))
                 
                 return self.engine
                 
@@ -247,7 +249,7 @@ class ArchiveHistoryApp:
             
             # 実行
             with engine.connect() as conn:
-                result = conn.execute(query, params).fetchone()
+                result = conn.execute(text(query), params).fetchone()
                 
                 if result:
                     return {
@@ -281,7 +283,7 @@ class ArchiveHistoryApp:
             query = "SELECT DISTINCT requester FROM archive_history ORDER BY requester"
             
             with engine.connect() as conn:
-                result = conn.execute(query)
+                result = conn.execute(text(query))
                 return [row[0] for row in result]
                 
         except Exception as e:
@@ -378,7 +380,7 @@ class ArchiveHistoryApp:
                     st.session_state.search_results = pd.DataFrame()
                     st.session_state.search_stats = {}
                     st.session_state.last_search_params = {}
-                    st.experimental_rerun()
+                    st.rerun()
     
     def render_sidebar_filters(self):
         """サイドバーフィルター描画"""
@@ -629,8 +631,9 @@ class ArchiveHistoryApp:
         try:
             engine = self.get_database_engine()
             with engine.connect() as conn:
-                conn.execute("SELECT COUNT(*) FROM archive_history")
-            st.success("✅ データベース接続: 正常")
+                result = conn.execute(text("SELECT COUNT(*) FROM archive_history"))
+                count = result.fetchone()[0]
+                st.success(f"✅ データベース接続: 正常 (総レコード数: {count:,}件)")
         except Exception as e:
             st.error(f"❌ データベース接続: エラー - {str(e)}")
     
@@ -683,7 +686,7 @@ class ArchiveHistoryApp:
                 st.session_state.search_stats = stats
                 st.session_state.last_search_params = current_params
                 
-                st.experimental_rerun()
+                st.rerun()
             
             # 結果表示（検索実行後またはキャッシュがある場合）
             if st.session_state.search_executed:
@@ -739,7 +742,7 @@ class ArchiveHistoryApp:
                 # セッション状態をリセット
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
-                st.experimental_rerun()
+                st.rerun()
 
 def main():
     """メイン関数"""
