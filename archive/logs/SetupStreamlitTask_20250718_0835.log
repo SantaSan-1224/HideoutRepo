@@ -1,0 +1,5 @@
+PS C:\temp\archive\archive_system> .\SetupStreamlitTask.ps1
+At C:\temp\archive\archive_system\SetupStreamlitTask.ps1:11 char:89
++ ... ‚¤ãƒ«ã‚¢ãƒ¼ã‚«ã‚¤ãƒ–å±¥æ­´ç®¡ç®å‰Šé™¤' in expression or statement.
+    + CategoryInfo          : ParserError: (:) [], ParseException
+    + FullyQualifiedErrorId : UnexpectedToken
