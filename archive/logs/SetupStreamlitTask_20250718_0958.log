@@ -1,0 +1,23 @@
+PS C:\Users\Administrator> cd C:\temp\archive\archive_system
+PS C:\temp\archive\archive_system> Get-Content .\logs\service\streamlit_service_20250718.log -Tail 20
+[2025-07-18 08:48:28] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:48:28] [INFO] Application Path: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:48:28] [INFO] Port: 8501
+[2025-07-18 08:48:28] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:48:28] [ERROR] Application file not found: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:59:01] [INFO] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] Port: 8501
+[2025-07-18 08:59:01] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:59:01] [INFO] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 08:59:01] [INFO] Starting Streamlit process...
+[2025-07-18 08:59:01] [INFO] Streamlit process started (PID: 5788)
+[2025-07-18 08:59:13] [INFO] Streamlit service started successfully
+[2025-07-18 09:51:37] [INFO] === Streamlit Service Starting ===
+[2025-07-18 09:51:37] [INFO] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 09:51:37] [INFO] Port: 8501
+[2025-07-18 09:51:37] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 09:51:37] [INFO] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 09:54:32] [INFO] === Streamlit Service Stop Process Started ===
+PS C:\temp\archive\archive_system> netstat -an | findstr :8501
+PS C:\temp\archive\archive_system>
