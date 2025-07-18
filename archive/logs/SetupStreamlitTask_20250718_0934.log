@@ -1,0 +1,54 @@
+PS C:\temp\archive\archive_system> Start-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
+PS C:\temp\archive\archive_system> Get-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
+
+TaskPath                                       TaskName                          State
+--------                                       --------                          -----
+\                                              ArchiveHistoryStreamlitService    Running
+
+
+PS C:\temp\archive\archive_system> Get-ScheduledTask -TaskName "ArchiveHistoryStreamlitService" | Select-Object *
+
+
+State                 : Running
+Actions               : {MSFT_TaskExecAction}
+Author                :
+Date                  :
+Description           : Archive History Management System - Streamlit Service
+Documentation         :
+Principal             : MSFT_TaskPrincipal2
+SecurityDescriptor    :
+Settings              : MSFT_TaskSettings3
+Source                :
+TaskName              : ArchiveHistoryStreamlitService
+TaskPath              : \
+Triggers              : {MSFT_TaskBootTrigger}
+URI                   : \ArchiveHistoryStreamlitService
+Version               :
+PSComputerName        :
+CimClass              : Root/Microsoft/Windows/TaskScheduler:MSFT_ScheduledTask
+CimInstanceProperties : {Actions, Author, Date, Description...}
+CimSystemProperties   : Microsoft.Management.Infrastructure.CimSystemProperties
+
+
+
+PS C:\temp\archive\archive_system>
+PS C:\temp\archive\archive_system> Get-ScheduledTask -TaskName "ArchiveHistoryStreamlitService" | Get-ScheduledTaskInfo
+
+
+LastRunTime        : 7/18/2025 8:59:59 AM
+LastTaskResult     : 267009
+NextRunTime        :
+NumberOfMissedRuns : 0
+TaskName           : ArchiveHistoryStreamlitService
+TaskPath           : \
+PSComputerName     :
+
+
+
+PS C:\temp\archive\archive_system>
+PS C:\temp\archive\archive_system> Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*streamlit*" }
+PS C:\temp\archive\archive_system> netstat -an | findstr :8501
+  TCP    0.0.0.0:8501           0.0.0.0:0              LISTENING
+  TCP    127.0.0.1:8501         127.0.0.1:53220        ESTABLISHED
+  TCP    127.0.0.1:53220        127.0.0.1:8501         ESTABLISHED
+PS C:\temp\archive\archive_system>
