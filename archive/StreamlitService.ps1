@@ -1,5 +1,5 @@
-# Streamlit Service Script (Fixed Version)
-# Runs Streamlit app as a Windows service with enhanced error handling
+# Final Version - Streamlit Service Script
+# Based on successful debug version
 
 param(
     [string]$AppPath = "C:\temp\archive\archive_system\web\streamlit_app.py",
@@ -23,31 +23,77 @@ function Write-ServiceLog {
     param([string]$Message, [string]$Level = "INFO")
     $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $LogEntry = "[$Timestamp] [$Level] $Message"
-    $LogEntry | Out-File -FilePath $LogFile -Append -Encoding UTF8
-    Write-Host $LogEntry
+    try {
+        $LogEntry | Out-File -FilePath $LogFile -Append -Encoding UTF8
+        Write-Host $LogEntry
+    } catch {
+        Write-Host "Logging failed: $_"
+    }
 }
 
 # Stop existing process function
 function Stop-StreamlitProcess {
+    Write-ServiceLog "Checking for existing processes..."
+    
+    # Check PID file
     if (Test-Path $PidFile) {
-        $PID = Get-Content $PidFile -ErrorAction SilentlyContinue
-        if ($PID) {
+        $OldPID = Get-Content $PidFile -ErrorAction SilentlyContinue
+        if ($OldPID) {
             try {
-                Stop-Process -Id $PID -Force -ErrorAction SilentlyContinue
-                Write-ServiceLog "Stopped existing Streamlit process (PID: $PID)"
+                $OldProcess = Get-Process -Id $OldPID -ErrorAction SilentlyContinue
+                if ($OldProcess) {
+                    Write-ServiceLog "Stopping old process (PID: $OldPID)"
+                    Stop-Process -Id $OldPID -Force
+                    Start-Sleep -Seconds 3
+                } else {
+                    Write-ServiceLog "Old process (PID: $OldPID) not found - already stopped"
+                }
             } catch {
-                Write-ServiceLog "Error stopping process: $_" "ERROR"
+                Write-ServiceLog "Error stopping old process: $_" "ERROR"
             }
         }
         Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+        Write-ServiceLog "PID file removed"
+    }
+    
+    # Check for any Streamlit processes
+    $StreamlitProcesses = Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { 
+        try {
+            (Get-WmiObject Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine -like "*streamlit*"
+        } catch {
+            $false
+        }
+    }
+    
+    if ($StreamlitProcesses) {
+        Write-ServiceLog "Found $($StreamlitProcesses.Count) existing Streamlit processes"
+        foreach ($proc in $StreamlitProcesses) {
+            Write-ServiceLog "Stopping Streamlit process (PID: $($proc.Id))"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Seconds 3
+    } else {
+        Write-ServiceLog "No existing Streamlit processes found"
     }
 }
 
 # Health check function
 function Test-StreamlitHealth {
     try {
-        $Response = Invoke-WebRequest -Uri "http://localhost:$Port/_stcore/health" -TimeoutSec 10 -UseBasicParsing
+        $Response = Invoke-WebRequest -Uri "http://localhost:$Port/_stcore/health" -TimeoutSec 5 -UseBasicParsing
         return $Response.StatusCode -eq 200
+    } catch {
+        return $false
+    }
+}
+
+# Port check function
+function Test-PortAvailable {
+    param([int]$PortNumber)
+    try {
+        $Listener = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+        $PortInUse = $Listener | Where-Object { $_.Port -eq $PortNumber }
+        return $PortInUse.Count -eq 0
     } catch {
         return $false
     }
@@ -59,9 +105,9 @@ Write-ServiceLog "Application Path: $AppPath"
 Write-ServiceLog "Port: $Port"
 Write-ServiceLog "Log Directory: $LogDir"
 
-# System startup delay (avoid early startup issues)
+# System startup delay (reduced based on debug success)
 Write-ServiceLog "Waiting for system startup completion..."
-Start-Sleep -Seconds 60
+Start-Sleep -Seconds 30
 
 # Check if application file exists
 if (-not (Test-Path $AppPath)) {
@@ -101,7 +147,7 @@ try {
     Write-ServiceLog "Python version: $PythonVersion"
     
     $StreamlitVersion = & python -m streamlit version 2>&1
-    Write-ServiceLog "Streamlit check: $StreamlitVersion"
+    Write-ServiceLog "Streamlit version: $StreamlitVersion"
 } catch {
     Write-ServiceLog "Python or Streamlit check failed: $_" "ERROR"
     exit 1
@@ -114,6 +160,13 @@ Stop-StreamlitProcess
 while ($true) {
     try {
         Write-ServiceLog "Starting Streamlit process..."
+        
+        # Check port availability
+        if (-not (Test-PortAvailable -PortNumber $Port)) {
+            Write-ServiceLog "Port $Port is already in use - waiting..." "WARNING"
+            Start-Sleep -Seconds 10
+            continue
+        }
         
         # Create process info
         $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -137,38 +190,43 @@ while ($true) {
         $Process.Id | Out-File -FilePath $PidFile -Encoding UTF8
         Write-ServiceLog "Streamlit process started (PID: $($Process.Id))"
         
-        # Wait for startup
-        Write-ServiceLog "Waiting for Streamlit startup..."
-        Start-Sleep -Seconds 15
-        
-        # Health check with extended timeout
+        # Wait for startup with enhanced monitoring
         $HealthCheckCount = 0
         $HealthCheckSuccess = $false
-        while ($HealthCheckCount -lt 40) {
+        while ($HealthCheckCount -lt 20) {  # 20 attempts, 2 seconds each = 40 seconds max
+            Start-Sleep -Seconds 2
+            $HealthCheckCount++
+            
+            # Check if process is still running
+            if ($Process.HasExited) {
+                Write-ServiceLog "Process exited early (Exit Code: $($Process.ExitCode))" "ERROR"
+                break
+            }
+            
+            # Health check
             if (Test-StreamlitHealth) {
-                Write-ServiceLog "Streamlit service started successfully"
+                Write-ServiceLog "Streamlit service started successfully (after $($HealthCheckCount * 2) seconds)"
                 $HealthCheckSuccess = $true
                 break
             }
-            Start-Sleep -Seconds 3
-            $HealthCheckCount++
-            Write-ServiceLog "Health check attempt $($HealthCheckCount)/40..."
         }
         
         if (-not $HealthCheckSuccess) {
-            Write-ServiceLog "Streamlit service startup failed (timeout after 2 minutes)" "ERROR"
+            Write-ServiceLog "Streamlit service startup failed (timeout)" "ERROR"
             
             # Collect error output
             if ($Process.StandardError -and -not $Process.StandardError.EndOfStream) {
                 $ErrorOutput = $Process.StandardError.ReadToEnd()
                 if ($ErrorOutput.Trim()) {
-                    Write-ServiceLog "Startup error output: $ErrorOutput" "ERROR"
+                    Write-ServiceLog "Startup error: $ErrorOutput" "ERROR"
                     $ErrorOutput | Out-File -FilePath $ErrorLog -Append -Encoding UTF8
                 }
             }
             
-            $Process.Kill()
-            throw "Startup timeout"
+            if (-not $Process.HasExited) {
+                $Process.Kill()
+            }
+            throw "Startup failed"
         }
         
         # Monitoring loop
@@ -178,7 +236,9 @@ while ($true) {
             # Health check
             if (-not (Test-StreamlitHealth)) {
                 Write-ServiceLog "Health check failed - restarting process" "WARNING"
-                $Process.Kill()
+                if (-not $Process.HasExited) {
+                    $Process.Kill()
+                }
                 break
             }
         }
@@ -192,7 +252,7 @@ while ($true) {
             if ($Process.StandardError -and -not $Process.StandardError.EndOfStream) {
                 $ErrorOutput = $Process.StandardError.ReadToEnd()
                 if ($ErrorOutput.Trim()) {
-                    Write-ServiceLog "Exit error output: $ErrorOutput" "ERROR"
+                    Write-ServiceLog "Exit error: $ErrorOutput" "ERROR"
                     $ErrorOutput | Out-File -FilePath $ErrorLog -Append -Encoding UTF8
                 }
             }
@@ -200,6 +260,11 @@ while ($true) {
         
     } catch {
         Write-ServiceLog "Unexpected error occurred: $_" "ERROR"
+    }
+    
+    # Cleanup before restart
+    if (Test-Path $PidFile) {
+        Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
     }
     
     # Wait before restart
