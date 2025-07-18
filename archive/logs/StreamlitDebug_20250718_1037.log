@@ -1,0 +1,33 @@
+PS C:\temp\archive\archive_system> .\StreamlitService_debug.ps1
+[2025-07-18 10:35:28.161] [INFO] [PID:5752] === DEBUG Streamlit Service Starting ===
+[2025-07-18 10:35:28.177] [INFO] [PID:5752] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 10:35:28.192] [INFO] [PID:5752] Port: 8501
+[2025-07-18 10:35:28.192] [INFO] [PID:5752] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 10:35:28.192] [INFO] [PID:5752] Process ID: 5752
+[2025-07-18 10:35:28.192] [INFO] [PID:5752] Waiting for system startup completion...
+[2025-07-18 10:35:58.195] [INFO] [PID:5752] Checking application file...
+[2025-07-18 10:35:58.196] [INFO] [PID:5752] Application file found: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 10:35:58.205] [INFO] [PID:5752] Changing to working directory: C:\temp\archive\archive_system\web
+[2025-07-18 10:35:58.211] [INFO] [PID:5752] Current location: C:\temp\archive\archive_system\web
+[2025-07-18 10:35:58.213] [INFO] [PID:5752] Checking config file: C:\temp\archive\archive_system\web\config\archive_config.json
+[2025-07-18 10:35:58.217] [INFO] [PID:5752] Config file found: C:\temp\archive\archive_system\web\config\archive_config.json
+[2025-07-18 10:35:58.221] [INFO] [PID:5752] Checking port 8501 availability...
+[2025-07-18 10:35:58.288] [INFO] [PID:5752] Verifying Python environment...
+[2025-07-18 10:35:58.313] [INFO] [PID:5752] Python version: Python 3.13.5
+[2025-07-18 10:35:59.498] [INFO] [PID:5752] Streamlit version: Streamlit, version 1.46.1
+[2025-07-18 10:35:59.501] [INFO] [PID:5752] Stopping existing processes...
+[2025-07-18 10:35:59.510] [INFO] [PID:5752] Checking for existing processes...
+[2025-07-18 10:35:59.510] [INFO] [PID:5752] No PID file found
+[2025-07-18 10:35:59.523] [INFO] [PID:5752] No existing Streamlit processes found
+[2025-07-18 10:35:59.526] [INFO] [PID:5752] Checking port after cleanup...
+[2025-07-18 10:36:04.536] [INFO] [PID:5752] Port 8501 available: True
+[2025-07-18 10:36:04.541] [INFO] [PID:5752] Starting Streamlit process...
+[2025-07-18 10:36:04.573] [INFO] [PID:5752] Command: python -m streamlit run "C:\temp\archive\archive_system\web\streamlit_app.py" --server.port 8501 --server.address 0.0.0.0 --server.headless true --logger.level debug
+[2025-07-18 10:36:04.589] [INFO] [PID:5752] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 10:36:04.630] [INFO] [PID:5752] Process started successfully
+[2025-07-18 10:36:04.638] [INFO] [PID:5752] Process ID: 2104
+[2025-07-18 10:36:04.638] [INFO] [PID:5752] Process Name: python
+[2025-07-18 10:36:04.654] [INFO] [PID:5752] PID saved to file: C:\temp\archive\archive_system\logs\service\streamlit.pid
+[2025-07-18 10:36:04.654] [INFO] [PID:5752] Monitoring initial startup (30 seconds)...
+[2025-07-18 10:36:11.859] [INFO] [PID:5752] Health check successful at 5 seconds
+[2025-07-18 10:36:11.859] [INFO] [PID:5752] === Streamlit Service Started Successfully ===
