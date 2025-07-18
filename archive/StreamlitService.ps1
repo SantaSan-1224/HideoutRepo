@@ -1,8 +1,8 @@
-# Streamlit Service Script
-# Runs Streamlit app as a Windows service with monitoring and auto-restart
+# Streamlit Service Script (Fixed Version)
+# Runs Streamlit app as a Windows service with enhanced error handling
 
 param(
-    [string]$AppPath = "C:\temp\archive\archive_system\streamlit_app.py",
+    [string]$AppPath = "C:\temp\archive\archive_system\web\streamlit_app.py",
     [int]$Port = 8501,
     [string]$LogDir = "C:\temp\archive\archive_system\logs\service",
     [int]$RestartDelay = 30
@@ -59,6 +59,10 @@ Write-ServiceLog "Application Path: $AppPath"
 Write-ServiceLog "Port: $Port"
 Write-ServiceLog "Log Directory: $LogDir"
 
+# System startup delay (avoid early startup issues)
+Write-ServiceLog "Waiting for system startup completion..."
+Start-Sleep -Seconds 60
+
 # Check if application file exists
 if (-not (Test-Path $AppPath)) {
     Write-ServiceLog "Application file not found: $AppPath" "ERROR"
@@ -69,6 +73,39 @@ if (-not (Test-Path $AppPath)) {
 $WorkingDir = Split-Path $AppPath -Parent
 Set-Location $WorkingDir
 Write-ServiceLog "Working Directory: $WorkingDir"
+
+# Check config file
+$ConfigPath = Join-Path $WorkingDir "config\archive_config.json"
+if (-not (Test-Path $ConfigPath)) {
+    Write-ServiceLog "Config file not found: $ConfigPath" "ERROR"
+    
+    # Try to copy from parent directory
+    $ParentConfigPath = "C:\temp\archive\archive_system\config\archive_config.json"
+    if (Test-Path $ParentConfigPath) {
+        Write-ServiceLog "Copying config from parent directory..."
+        $ConfigDir = Join-Path $WorkingDir "config"
+        if (-not (Test-Path $ConfigDir)) {
+            New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+        }
+        Copy-Item $ParentConfigPath $ConfigPath -Force
+        Write-ServiceLog "Config file copied successfully"
+    } else {
+        Write-ServiceLog "Parent config file also not found: $ParentConfigPath" "ERROR"
+        exit 1
+    }
+}
+
+# Verify Python and Streamlit
+try {
+    $PythonVersion = & python --version 2>&1
+    Write-ServiceLog "Python version: $PythonVersion"
+    
+    $StreamlitVersion = & python -m streamlit version 2>&1
+    Write-ServiceLog "Streamlit check: $StreamlitVersion"
+} catch {
+    Write-ServiceLog "Python or Streamlit check failed: $_" "ERROR"
+    exit 1
+}
 
 # Stop existing process
 Stop-StreamlitProcess
@@ -90,28 +127,46 @@ while ($true) {
         # Start process
         $Process = New-Object System.Diagnostics.Process
         $Process.StartInfo = $ProcessInfo
-        $Process.Start() | Out-Null
+        $ProcessStarted = $Process.Start()
+        
+        if (-not $ProcessStarted) {
+            throw "Failed to start process"
+        }
         
         # Save process ID
         $Process.Id | Out-File -FilePath $PidFile -Encoding UTF8
         Write-ServiceLog "Streamlit process started (PID: $($Process.Id))"
         
         # Wait for startup
-        Start-Sleep -Seconds 10
+        Write-ServiceLog "Waiting for Streamlit startup..."
+        Start-Sleep -Seconds 15
         
-        # Health check
+        # Health check with extended timeout
         $HealthCheckCount = 0
-        while ($HealthCheckCount -lt 30) {
+        $HealthCheckSuccess = $false
+        while ($HealthCheckCount -lt 40) {
             if (Test-StreamlitHealth) {
                 Write-ServiceLog "Streamlit service started successfully"
+                $HealthCheckSuccess = $true
                 break
             }
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 3
             $HealthCheckCount++
+            Write-ServiceLog "Health check attempt $($HealthCheckCount)/40..."
         }
         
-        if ($HealthCheckCount -eq 30) {
-            Write-ServiceLog "Streamlit service startup failed (timeout)" "ERROR"
+        if (-not $HealthCheckSuccess) {
+            Write-ServiceLog "Streamlit service startup failed (timeout after 2 minutes)" "ERROR"
+            
+            # Collect error output
+            if ($Process.StandardError -and -not $Process.StandardError.EndOfStream) {
+                $ErrorOutput = $Process.StandardError.ReadToEnd()
+                if ($ErrorOutput.Trim()) {
+                    Write-ServiceLog "Startup error output: $ErrorOutput" "ERROR"
+                    $ErrorOutput | Out-File -FilePath $ErrorLog -Append -Encoding UTF8
+                }
+            }
+            
             $Process.Kill()
             throw "Startup timeout"
         }
@@ -137,7 +192,7 @@ while ($true) {
             if ($Process.StandardError -and -not $Process.StandardError.EndOfStream) {
                 $ErrorOutput = $Process.StandardError.ReadToEnd()
                 if ($ErrorOutput.Trim()) {
-                    Write-ServiceLog "Error output: $ErrorOutput" "ERROR"
+                    Write-ServiceLog "Exit error output: $ErrorOutput" "ERROR"
                     $ErrorOutput | Out-File -FilePath $ErrorLog -Append -Encoding UTF8
                 }
             }
