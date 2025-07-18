@@ -100,9 +100,9 @@ graph TB
 ### 1.3 技術スタック
 
 - **処理サーバ**: AWS EC2（4vCPU、16GB メモリ）
-- **言語**: Python 3.9以上
-- **データベース**: PostgreSQL 13以上
-- **Web アプリ**: Streamlit 1.28以上
+- **言語**: Python 3.9 以上
+- **データベース**: PostgreSQL 13 以上
+- **Web アプリ**: Streamlit 1.28 以上
 - **AWS 連携**: boto3、AWS CLI
 - **ファイルサーバ**: FSx for Windows File Server
 - **テストフレームワーク**: pytest、pytest-cov
@@ -112,54 +112,61 @@ graph TB
 ### 2.1 実装完了項目
 
 #### 2.1.1 アーカイブスクリプト（archive_script_main.py）
-- ✅ **CSV読み込み・検証処理**: UTF-8-SIG対応、エラー項目記録
+
+- ✅ **CSV 読み込み・検証処理**: UTF-8-SIG 対応、エラー項目記録
 - ✅ **ファイル収集処理**: os.walk()による再帰的収集
-- ✅ **S3アップロード処理**: boto3、VPCエンドポイント対応
+- ✅ **S3 アップロード処理**: boto3、VPC エンドポイント対応
 - ✅ **ストレージクラス自動変換**: GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE
 - ✅ **アーカイブ後処理**: 空ファイル作成 → 元ファイル削除
 - ✅ **データベース登録**: PostgreSQL、トランザクション管理
-- ✅ **エラーハンドリング**: 再試行可能CSVフォーマット出力
+- ✅ **エラーハンドリング**: 再試行可能 CSV フォーマット出力
 
 #### 2.1.2 復元スクリプト（restore_script_main.py）
-- ✅ **CSV読み込み・検証処理**: 元ファイルパス+復元先ディレクトリ
-- ✅ **データベース検索**: S3パス取得
-- ✅ **2段階実行モード**: --request-only / --download-only
-- ✅ **S3復元リクエスト**: restore_object API
+
+- ✅ **CSV 読み込み・検証処理**: 元ファイルパス+復元先ディレクトリ
+- ✅ **データベース検索**: S3 パス取得
+- ✅ **2 段階実行モード**: --request-only / --download-only
+- ✅ **S3 復元リクエスト**: restore_object API
 - ✅ **復元ステータス確認**: head_object API
-- ✅ **復元ステータス管理**: JSON形式でのステータス保存・読み込み
-- ✅ **ダウンロード・配置処理**: 同名ファイルスキップ、0バイトファイル対応
+- ✅ **復元ステータス管理**: JSON 形式でのステータス保存・読み込み
+- ✅ **ダウンロード・配置処理**: 同名ファイルスキップ、0 バイトファイル対応
 - ✅ **一時ファイル管理**: 安全なダウンロード・クリーンアップ
 
-#### 2.1.3 Streamlitアプリ（streamlit_app.py）
+#### 2.1.3 Streamlit アプリ（streamlit_app.py）
+
 - ✅ **基本画面構成**: ヘッダー、サイドバー、メインエリア
 - ✅ **検索・フィルタリング**: 日付範囲、依頼者、ファイルパス
-- ✅ **データベース接続**: PostgreSQL、SQLAlchemy対応
+- ✅ **データベース接続**: PostgreSQL、SQLAlchemy 対応
 - ✅ **統計情報表示**: ファイル数、サイズ、依頼件数
 - ✅ **データテーブル表示**: ページネーション、詳細表示
-- ✅ **エクスポート機能**: Excel、CSV形式
+- ✅ **エクスポート機能**: Excel、CSV 形式
 - ✅ **セッション状態管理**: 検索結果保持、初期画面リセット
-- ✅ **ブラウザ互換性**: Edge 93以降対応
+- ✅ **ブラウザ互換性**: Edge 93 以降対応
 
 ### 2.2 検証済み機能
 
 #### 2.2.1 動作確認済み環境
+
 - **OS**: Windows Server 2022
-- **Python**: 3.9以上
+- **Python**: 3.9 以上
 - **Streamlit**: 1.46
-- **ブラウザ**: Microsoft Edge 93以降
+- **ブラウザ**: Microsoft Edge 93 以降
 
 #### 2.2.2 確認済み機能
-- **0バイトファイル処理**: S3アップロード・ダウンロード
-- **VPCエンドポイント通信**: S3との通信
-- **データベース操作**: PostgreSQL CRUD操作
+
+- **0 バイトファイル処理**: S3 アップロード・ダウンロード
+- **VPC エンドポイント通信**: S3 との通信
+- **データベース操作**: PostgreSQL CRUD 操作
 - **エラーハンドリング**: 各種エラーパターン
 - **ログ出力**: 処理状況・エラー情報
 
 ### 2.3 判明した技術的課題と対策
 
-#### 2.3.1 SQLAlchemy 2.0互換性問題
-**問題**: 生SQL文字列の直接実行が非対応
+#### 2.3.1 SQLAlchemy 2.0 互換性問題
+
+**問題**: 生 SQL 文字列の直接実行が非対応
 **対策**: `text()`でのラップが必要
+
 ```python
 # 修正前
 conn.execute("SELECT 1")
@@ -169,9 +176,11 @@ from sqlalchemy import text
 conn.execute(text("SELECT 1"))
 ```
 
-#### 2.3.2 Streamlit API変更
+#### 2.3.2 Streamlit API 変更
+
 **問題**: `st.experimental_rerun()`の廃止
 **対策**: `st.rerun()`への統一
+
 ```python
 # 修正前
 st.experimental_rerun()
@@ -181,8 +190,9 @@ st.rerun()
 ```
 
 #### 2.3.3 ブラウザ互換性問題
-**問題**: `Object.hasOwn()`がEdge 86で未対応
-**対策**: Edge 93以降への更新が必要
+
+**問題**: `Object.hasOwn()`が Edge 86 で未対応
+**対策**: Edge 93 以降への更新が必要
 
 ## 3. データベース設計
 
@@ -224,22 +234,24 @@ CREATE INDEX idx_archive_history_requester_date ON archive_history(requester, re
 ### 3.3 データベース運用
 
 #### 3.3.1 接続設定
+
 ```json
 {
-    "database": {
-        "host": "rds-endpoint.region.rds.amazonaws.com",
-        "port": 5432,
-        "database": "archive_system",
-        "user": "postgres",
-        "password": "secure_password",
-        "timeout": 30
-    }
+  "database": {
+    "host": "rds-endpoint.region.rds.amazonaws.com",
+    "port": 5432,
+    "database": "archive_system",
+    "user": "postgres",
+    "password": "secure_password",
+    "timeout": 30
+  }
 }
 ```
 
 #### 3.3.2 パフォーマンス最適化
+
 - **バッチ挿入**: executemany()使用
-- **トランザクション管理**: with文によるautocommit制御
+- **トランザクション管理**: with 文による autocommit 制御
 - **インデックス活用**: 検索条件に応じたインデックス設計
 
 ## 4. アーカイブスクリプト詳細設計
@@ -298,7 +310,8 @@ class ArchiveProcessor:
     def run(csv_path: str, request_id: str) -> int
 ```
 
-#### 4.2.2 S3キー生成ロジック
+#### 4.2.2 S3 キー生成ロジック
+
 ```python
 def _generate_s3_key(self, file_path: str) -> str:
     """サーバ名ベースのS3キー生成"""
@@ -313,14 +326,15 @@ def _generate_s3_key(self, file_path: str) -> str:
 | エラー種別             | 処理継続 | リトライ | 出力ファイル |
 | ---------------------- | -------- | -------- | ------------ |
 | CSV 読み込みエラー     | ×        | -        | -            |
-| CSV 検証エラー         | ✓        | -        | CSV再試行用  |
+| CSV 検証エラー         | ✓        | -        | CSV 再試行用 |
 | S3 接続エラー          | ×        | -        | -            |
-| S3 操作エラー          | ✓        | ✓        | CSV再試行用  |
-| ファイルアクセスエラー | ✓        | ×        | CSV再試行用  |
+| S3 操作エラー          | ✓        | ✓        | CSV 再試行用 |
+| ファイルアクセスエラー | ✓        | ×        | CSV 再試行用 |
 | データベース接続エラー | ✓        | ×        | -            |
 
-#### 4.3.2 エラーCSV出力
-- **CSV検証エラー**: `logs/{元ファイル名}_csv_retry_{timestamp}.csv`
+#### 4.3.2 エラー CSV 出力
+
+- **CSV 検証エラー**: `logs/{元ファイル名}_csv_retry_{timestamp}.csv`
 - **アーカイブエラー**: `logs/{元ファイル名}_archive_retry_{timestamp}.csv`
 
 ## 5. 復元スクリプト詳細設計
@@ -374,6 +388,7 @@ class RestoreProcessor:
 ### 5.3 復元ステータス管理
 
 #### 5.3.1 ステータスファイル形式
+
 **ファイル名**: `logs/restore_status_{request_id}.json`
 
 ```json
@@ -402,6 +417,7 @@ class RestoreProcessor:
 ```
 
 #### 5.3.2 復元ステータス遷移
+
 ```
 requested → pending → in_progress → completed → downloaded
                                   → failed
@@ -412,6 +428,7 @@ requested → pending → in_progress → completed → downloaded
 ### 6.1 画面構成
 
 #### 6.1.1 メイン画面レイアウト
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │  📁 アーカイブ履歴管理システム                      │
@@ -438,6 +455,7 @@ requested → pending → in_progress → completed → downloaded
 #### 6.1.2 主要コンポーネント
 
 **ArchiveHistoryApp クラス**
+
 ```python
 class ArchiveHistoryApp:
     def __init__(self)
@@ -460,6 +478,7 @@ class ArchiveHistoryApp:
 ### 6.2 セッション状態管理
 
 #### 6.2.1 セッション変数
+
 ```python
 # 検索実行状態
 st.session_state.search_executed = False
@@ -473,6 +492,7 @@ st.session_state.last_search_params = {}
 ```
 
 #### 6.2.2 状態遷移
+
 ```
 初期画面 → 検索実行 → 結果表示 → 初期画面リセット
 ```
@@ -480,24 +500,26 @@ st.session_state.last_search_params = {}
 ### 6.3 データベース連携
 
 #### 6.3.1 検索クエリ最適化
+
 ```sql
 -- 基本検索（インデックス活用）
-SELECT id, request_id, requester, request_date, 
+SELECT id, request_id, requester, request_date,
        original_file_path, s3_path, archive_date, file_size
-FROM archive_history 
+FROM archive_history
 WHERE request_date::date BETWEEN %s AND %s
-ORDER BY request_date DESC 
+ORDER BY request_date DESC
 LIMIT %s OFFSET %s;
 
 -- 統計情報取得
 SELECT COUNT(*) as total_files,
        SUM(file_size) as total_size,
        COUNT(DISTINCT request_id) as total_requests
-FROM archive_history 
+FROM archive_history
 WHERE request_date::date BETWEEN %s AND %s;
 ```
 
-#### 6.3.2 SQLAlchemy対応
+#### 6.3.2 SQLAlchemy 対応
+
 ```python
 # 修正済みパターン
 from sqlalchemy import text
@@ -509,6 +531,7 @@ result = conn.execute(text(query), params)
 ### 7.1 共通設定ファイル
 
 **config/archive_config.json**
+
 ```json
 {
   "aws": {
@@ -554,10 +577,12 @@ result = conn.execute(text(query), params)
 ### 7.2 環境別設定
 
 #### 7.2.1 開発環境
+
 - オンプレミス検証用
 - 設定ファイル: `config/dev_config.json`
 
 #### 7.2.2 本番環境
+
 - AWS EC2 + RDS + S3
 - 設定ファイル: `config/prod_config.json`
 
@@ -566,39 +591,45 @@ result = conn.execute(text(query), params)
 ### 8.1 ログ管理
 
 #### 8.1.1 ログ出力形式
+
 ```
-[2025-07-17 13:00:32] [INFO] アーカイブ処理開始 - Request ID: REQ-2025-001
-[2025-07-17 13:00:35] [INFO] CSV読み込み完了 - 有効ディレクトリ数: 5
-[2025-07-17 13:01:00] [INFO] ファイル収集完了 - 総ファイル数: 1,234
-[2025-07-17 13:05:30] [INFO] S3アップロード完了 - 成功: 1,234件
-[2025-07-17 13:06:00] [INFO] アーカイブ処理完了
+[2025-07-18 10:36:04] [INFO] Streamlit process started (PID: 2104)
+[2025-07-18 10:36:11] [INFO] Health check successful at 5 seconds
+[2025-07-18 10:36:11] [INFO] === Streamlit Service Started Successfully ===
 ```
 
 #### 8.1.2 ログローテーション
-- **保持期間**: 30日
-- **圧縮**: 7日経過後にgzip圧縮
+
+- **保持期間**: 30 日
+- **圧縮**: 7 日経過後に gzip 圧縮
 - **サイズ制限**: 100MB/ファイル
 
 ### 8.2 エラー監視
 
 #### 8.2.1 監視対象
+
 - **処理失敗率**: 5%以上でアラート
-- **処理時間**: 想定時間の2倍以上でアラート
+- **処理時間**: 想定時間の 2 倍以上でアラート
 - **ディスク使用量**: 80%以上でアラート
 
 #### 8.2.2 アラート通知
+
 - **メール通知**: 運用担当者へ
 - **ログ出力**: 詳細なエラー情報
 
-### 8.3 Windows Server サービス化
+### 8.3 Windows Server サービス化（実装完了）
 
 #### 8.3.1 推奨方法
-**PowerShell + タスクスケジューラ**
-- 標準機能のみ使用
-- 自動再起動機能
-- 健全性チェック機能
+
+**PowerShell + タスクスケジューラ**（実装済み）
+
+- ✅ 標準機能のみ使用
+- ✅ 自動再起動機能
+- ✅ 健全性チェック機能
+- ✅ 詳細ログ出力機能
 
 #### 8.3.2 サービス管理
+
 ```powershell
 # サービス開始
 Start-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
@@ -610,120 +641,72 @@ Stop-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
 Get-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
 
 # ログ確認
-Get-Content "C:\archive_system\logs\service\streamlit_service_$(Get-Date -Format 'yyyyMMdd').log" -Tail 20
+Get-Content "C:\temp\archive\archive_system\logs\service\streamlit_service_$(Get-Date -Format 'yyyyMMdd').log" -Tail 20
 ```
 
-#### 8.3.3 サービス用PowerShellスクリプト
-**StreamlitService.ps1**
+#### 8.3.3 サービス用 PowerShell スクリプト（最終版）
+
+**StreamlitService.ps1**の主要機能：
+
 ```powershell
+# 主要パラメータ
 param(
-    [string]$AppPath = "C:\archive_system\streamlit_app.py",
+    [string]$AppPath = "C:\temp\archive\archive_system\web\streamlit_app.py",
     [int]$Port = 8501,
-    [string]$LogDir = "C:\archive_system\logs\service"
+    [string]$LogDir = "C:\temp\archive\archive_system\logs\service",
+    [int]$RestartDelay = 30
 )
 
-# ログディレクトリ作成
-if (-not (Test-Path $LogDir)) {
-    New-Item -ItemType Directory -Path $LogDir -Force
-}
-
-# ログファイルパス
-$LogFile = Join-Path $LogDir "streamlit_service_$(Get-Date -Format 'yyyyMMdd').log"
-$PidFile = Join-Path $LogDir "streamlit.pid"
-
-# ログ出力関数
-function Write-ServiceLog {
-    param([string]$Message, [string]$Level = "INFO")
-    $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $LogEntry = "[$Timestamp] [$Level] $Message"
-    $LogEntry | Out-File -FilePath $LogFile -Append -Encoding UTF8
-    Write-Host $LogEntry
-}
-
-# プロセス健全性チェック関数
-function Test-StreamlitHealth {
-    try {
-        $Response = Invoke-WebRequest -Uri "http://localhost:$Port/_stcore/health" -TimeoutSec 10 -UseBasicParsing
-        return $Response.StatusCode -eq 200
-    } catch {
-        return $false
-    }
-}
-
-# メインループ
-while ($true) {
-    try {
-        Write-ServiceLog "Streamlitプロセスを起動中..."
-        
-        # Streamlit起動
-        $ProcessInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $ProcessInfo.FileName = "python"
-        $ProcessInfo.Arguments = "-m streamlit run `"$AppPath`" --server.port $Port --server.address 0.0.0.0 --server.headless true"
-        $ProcessInfo.UseShellExecute = $false
-        $ProcessInfo.RedirectStandardOutput = $true
-        $ProcessInfo.RedirectStandardError = $true
-        $ProcessInfo.WorkingDirectory = Split-Path $AppPath -Parent
-        
-        $Process = New-Object System.Diagnostics.Process
-        $Process.StartInfo = $ProcessInfo
-        $Process.Start() | Out-Null
-        
-        # プロセスID保存
-        $Process.Id | Out-File -FilePath $PidFile -Encoding UTF8
-        Write-ServiceLog "Streamlitプロセス開始 (PID: $($Process.Id))"
-        
-        # 起動待機
-        Start-Sleep -Seconds 10
-        
-        # 健全性チェック
-        $HealthCheckCount = 0
-        while ($HealthCheckCount -lt 30) {
-            if (Test-StreamlitHealth) {
-                Write-ServiceLog "Streamlitサービスが正常に起動しました"
-                break
-            }
-            Start-Sleep -Seconds 2
-            $HealthCheckCount++
-        }
-        
-        # 監視ループ
-        while (-not $Process.HasExited) {
-            Start-Sleep -Seconds 30
-            
-            # 健全性チェック
-            if (-not (Test-StreamlitHealth)) {
-                Write-ServiceLog "健全性チェック失敗 - プロセスを再起動します" "WARNING"
-                $Process.Kill()
-                break
-            }
-        }
-        
-        # プロセス終了検知
-        if ($Process.HasExited) {
-            $ExitCode = $Process.ExitCode
-            Write-ServiceLog "Streamlitプロセスが終了しました (ExitCode: $ExitCode)" "WARNING"
-        }
-        
-    } catch {
-        Write-ServiceLog "予期しないエラーが発生しました: $_" "ERROR"
-    }
-    
-    # 再起動待機
-    Write-ServiceLog "再起動までの待機中... (30秒)"
-    Start-Sleep -Seconds 30
-}
+# 主要機能
+- システム起動時30秒待機（安定化）
+- 既存プロセスの確実な停止
+- Python/Streamlit環境の事前確認
+- ポート競合の自動回避
+- 健全性チェック（7秒で成功確認）
+- プロセス監視とエラー時の自動再起動
+- 詳細ログ出力（成功・失敗の詳細記録）
 ```
+
+#### 8.3.4 動作確認済み仕様
+
+- **起動時間**: システム起動後約 30 秒で開始
+- **健全性チェック**: 7 秒以内で成功
+- **自動再起動**: プロセス異常終了時に 30 秒後再開
+- **ログ出力**: 日付別ファイルで詳細記録
+- **Windows 統合**: タスクスケジューラで完全管理
+
+#### 8.3.5 トラブルシューティング実績
+
+**解決済み課題：**
+
+- ✅ **文字エンコーディング問題**: UTF-8 BOM 無しで解決
+- ✅ **プロセス競合問題**: 既存プロセス確実停止で解決
+- ✅ **起動タイミング問題**: 30 秒待機で解決
+- ✅ **設定ファイルパス問題**: 自動コピー機能で解決
+- ✅ **健全性チェック問題**: タイムアウト調整で解決
+
+#### 8.3.6 運用実績
+
+**検証完了項目：**
+
+- ✅ **手動起動**: 正常動作確認済み
+- ✅ **タスクスケジューラ起動**: 正常動作確認済み
+- ✅ **Windows 再起動テスト**: 自動起動確認済み
+- ✅ **プロセス監視**: 異常検知・再起動確認済み
+- ✅ **ログ出力**: 詳細な動作履歴記録確認済み
 
 ## 9. セキュリティ設計
 
 ### 9.1 認証・認可
 
 #### 9.1.1 アクセス制御
+
 - **運用管理者**: 全機能アクセス可能
-- **依頼者**: 企業社員番号8桁による識別
+- **依頼者**: 企業社員番号 8 桁による識別
 - **ファイルアクセス**: 部署ごとに独立したファイルサーバ構成
 
-#### 9.1.2 AWS認証
+#### 9.1.2 AWS 認証
+
 ```json
 {
   "aws_authentication": {
@@ -742,11 +725,13 @@ while ($true) {
 ### 9.2 データ保護
 
 #### 9.2.1 通信暗号化
-- **S3通信**: VPCエンドポイント経由のHTTPS
-- **データベース**: SSL/TLS接続
-- **Streamlit**: HTTPS対応（必要に応じて）
+
+- **S3 通信**: VPC エンドポイント経由の HTTPS
+- **データベース**: SSL/TLS 接続
+- **Streamlit**: HTTPS 対応（必要に応じて）
 
 #### 9.2.2 ログ保護
+
 ```python
 # 機密情報のマスキング
 def mask_sensitive_data(log_message: str) -> str:
@@ -758,34 +743,39 @@ def mask_sensitive_data(log_message: str) -> str:
 ### 9.3 監査ログ
 
 #### 9.3.1 記録対象
-- **アクセスログ**: Streamlitアプリへのアクセス
+
+- **アクセスログ**: Streamlit アプリへのアクセス
 - **操作ログ**: アーカイブ・復元処理の実行
 - **システムログ**: エラー・警告・重要イベント
 
 #### 9.3.2 ログ保持期間
-- **アクセスログ**: 1年
-- **操作ログ**: 7年（法的要件に応じて）
-- **システムログ**: 3年
+
+- **アクセスログ**: 1 年
+- **操作ログ**: 7 年（法的要件に応じて）
+- **システムログ**: 3 年
 
 ## 10. パフォーマンス設計
 
 ### 10.1 処理能力
 
 #### 10.1.1 想定処理量
-- **月間依頼件数**: 100-200件
-- **月間処理ファイル数**: 10,000-20,000ファイル
+
+- **月間依頼件数**: 100-200 件
+- **月間処理ファイル数**: 10,000-20,000 ファイル
 - **最大ファイルサイズ**: 10GB
 - **同時実行**: なし（シーケンシャル処理）
 
 #### 10.1.2 処理時間目安
-- **アーカイブ処理**: 1GB当たり5-10分
-- **復元リクエスト**: 1ファイル当たり1-2秒
-- **復元完了**: 48時間以内（AWS仕様）
-- **ダウンロード**: 1GB当たり2-5分
+
+- **アーカイブ処理**: 1GB 当たり 5-10 分
+- **復元リクエスト**: 1 ファイル当たり 1-2 秒
+- **復元完了**: 48 時間以内（AWS 仕様）
+- **ダウンロード**: 1GB 当たり 2-5 分
 
 ### 10.2 最適化ポイント
 
-#### 10.2.1 S3転送最適化
+#### 10.2.1 S3 転送最適化
+
 ```python
 # チャンクサイズ最適化
 CHUNK_SIZE = 8 * 1024 * 1024  # 8MB
@@ -806,12 +796,13 @@ s3_client.upload_file(
 ```
 
 #### 10.2.2 データベース最適化
+
 ```python
 # バッチ挿入
 cursor.executemany(insert_query, batch_data)
 
 # インデックス活用
-SELECT * FROM archive_history 
+SELECT * FROM archive_history
 WHERE request_date::date BETWEEN %s AND %s
 ORDER BY request_date DESC;
 ```
@@ -819,63 +810,73 @@ ORDER BY request_date DESC;
 ### 10.3 リソース監視
 
 #### 10.3.1 システムリソース
-- **CPU使用率**: 平均70%以下
-- **メモリ使用量**: 物理メモリの80%以下
-- **ディスク使用量**: 一時領域90%以下
+
+- **CPU 使用率**: 平均 70%以下
+- **メモリ使用量**: 物理メモリの 80%以下
+- **ディスク使用量**: 一時領域 90%以下
 
 #### 10.3.2 ネットワーク
-- **S3転送速度**: 100Mbps以上
-- **データベース応答時間**: 100ms以下
-- **VPCエンドポイント可用性**: 99.9%以上
+
+- **S3 転送速度**: 100Mbps 以上
+- **データベース応答時間**: 100ms 以下
+- **VPC エンドポイント可用性**: 99.9%以上
 
 ## 11. 今後の拡張計画
 
-### 11.1 短期拡張（3ヶ月以内）
+### 11.1 短期拡張（3 ヶ月以内）
 
 #### 11.1.1 完了済み項目
-- [x] CSV検証エラー処理の改善
-- [x] S3アップロード機能の実装
+
+- [x] CSV 検証エラー処理の改善
+- [x] S3 アップロード機能の実装
 - [x] エラーハンドリングの強化
-- [x] S3パス構造の改善
+- [x] S3 パス構造の改善
 - [x] アーカイブ後処理の実装
 - [x] データベース登録処理の実装
 - [x] 復元スクリプトの基盤実装
 - [x] 復元リクエスト送信機能の実装
 - [x] 復元ステータス確認機能の実装
 - [x] 復元ステータス管理機能の実装
-- [x] 2段階実行モードの実装
+- [x] 2 段階実行モードの実装
 - [x] ダウンロード・配置機能の実装
 - [x] 一時ファイル管理機能の実装
 - [x] 実機動作検証完了
-- [x] Streamlitアプリの基本実装
+- [x] Streamlit アプリの基本実装
+- [x] Windows Server サービス化完了
+- [x] 技術的課題の解決（SQLAlchemy 2.0 対応、ブラウザ互換性等）
 
 #### 11.1.2 残作業
+
 - [ ] 単体テストコードの実装
-- [ ] EC2環境での統合テスト
+- [ ] EC2 環境での統合テスト
 - [ ] 本番環境構築
 
-### 11.2 中期拡張（6ヶ月以内）
+### 11.2 中期拡張（6 ヶ月以内）
 
 #### 11.2.1 機能拡張
+
 - [ ] 並行処理対応
 - [ ] パフォーマンス最適化
 - [ ] 監視・アラート機能
 - [ ] 進捗確認機能の実装
 
 #### 11.2.2 運用改善
+
 - [ ] 自動化スクリプト
 - [ ] 運用手順書の詳細化
 - [ ] トラブルシューティングガイド
 
-### 11.3 長期拡張（1年以内）
+### 11.3 長期拡張（1 年以内）
 
 #### 11.3.1 高度な機能
-- [ ] WebUIでの依頼受付機能
+
+- [ ] WebUI での依頼受付機能
 - [ ] 自動スケジューリング機能
 - [ ] レポート機能の拡充
-- [ ] API化
+- [ ] API 化
 
 #### 11.3.2 運用効率化
+
 - [ ] 機械学習による異常検知
 - [ ] 自動復旧機能
 - [ ] 容量予測機能
@@ -885,12 +886,14 @@ ORDER BY request_date DESC;
 ### 12.1 テスト環境
 
 #### 12.1.1 開発環境
+
 - **OS**: Windows Server 2022
 - **データベース**: PostgreSQL 13 (ローカル)
 - **ストレージ**: ローカルファイルシステム
 - **目的**: 機能開発・単体テスト
 
 #### 12.1.2 統合テスト環境
+
 - **OS**: AWS EC2 (Windows Server 2022)
 - **データベース**: Amazon RDS for PostgreSQL
 - **ストレージ**: Amazon S3
@@ -899,6 +902,7 @@ ORDER BY request_date DESC;
 ### 12.2 テストケース
 
 #### 12.2.1 単体テスト
+
 ```python
 def test_csv_validation():
     """CSV検証機能のテスト"""
@@ -917,18 +921,21 @@ def test_file_restoration():
 ```
 
 #### 12.2.2 統合テスト
-- **エンドツーエンドテスト**: アーカイブ→復元の完全フロー
+
+- **エンドツーエンドテスト**: アーカイブ → 復元の完全フロー
 - **負荷テスト**: 大量ファイル処理
 - **障害テスト**: ネットワーク断、システム障害
 
 ### 12.3 品質保証
 
 #### 12.3.1 コード品質
+
 - **コードレビュー**: 全変更のレビュー必須
-- **静的解析**: pylint、flake8の実行
+- **静的解析**: pylint、flake8 の実行
 - **テストカバレッジ**: 80%以上
 
 #### 12.3.2 ドキュメント品質
+
 - **設計書**: 実装との整合性確認
 - **運用手順書**: 実機での手順検証
 - **トラブルシューティング**: 想定障害シナリオ
@@ -938,16 +945,19 @@ def test_file_restoration():
 ### 13.1 段階的移行
 
 #### 13.1.1 Phase 1: 基盤構築
-- AWS環境構築（EC2、RDS、S3）
+
+- AWS 環境構築（EC2、RDS、S3）
 - ネットワーク設定（VPC、エンドポイント）
 - 基本アプリケーションデプロイ
 
 #### 13.1.2 Phase 2: 機能検証
+
 - 小規模データでの動作確認
 - 各機能の単体テスト
 - 統合テストの実施
 
 #### 13.1.3 Phase 3: 本格運用
+
 - 大規模データでの負荷テスト
 - 運用手順の確定
 - 本番環境での運用開始
@@ -955,13 +965,15 @@ def test_file_restoration():
 ### 13.2 移行チェックリスト
 
 #### 13.2.1 技術的要件
-- [ ] AWS環境構築完了
+
+- [ ] AWS 環境構築完了
 - [ ] アプリケーションデプロイ完了
 - [ ] データベース設定完了
 - [ ] ネットワーク設定完了
 - [ ] セキュリティ設定完了
 
 #### 13.2.2 運用要件
+
 - [ ] 運用手順書完成
 - [ ] 監視設定完了
 - [ ] バックアップ設定完了
@@ -973,6 +985,7 @@ def test_file_restoration():
 ### 14.1 アーカイブ処理手順
 
 #### 14.1.1 事前準備
+
 ```bash
 # 1. 設定ファイル確認
 python -c "import json; print(json.load(open('config/archive_config.json')))"
@@ -985,6 +998,7 @@ ls -la logs/
 ```
 
 #### 14.1.2 実行手順
+
 ```bash
 # 1. アーカイブ処理実行
 python archive_script_main.py archive_request.csv REQ-2025-001
@@ -999,6 +1013,7 @@ ls logs/*retry*.csv  # 再試行用CSVの確認
 ### 14.2 復元処理手順
 
 #### 14.2.1 復元リクエスト送信
+
 ```bash
 # 1. 復元リクエスト送信
 python restore_script_main.py restore_request.csv REQ-RESTORE-001 --request-only
@@ -1007,7 +1022,8 @@ python restore_script_main.py restore_request.csv REQ-RESTORE-001 --request-only
 cat logs/restore_status_REQ-RESTORE-001.json
 ```
 
-#### 14.2.2 ダウンロード実行（48時間後）
+#### 14.2.2 ダウンロード実行（48 時間後）
+
 ```bash
 # 1. ダウンロード実行
 python restore_script_main.py restore_request.csv REQ-RESTORE-001 --download-only
@@ -1016,9 +1032,10 @@ python restore_script_main.py restore_request.csv REQ-RESTORE-001 --download-onl
 ls -la /restored/files/
 ```
 
-### 14.3 Streamlitアプリ運用
+### 14.3 Streamlit アプリ運用
 
 #### 14.3.1 手動起動
+
 ```bash
 # 1. アプリ起動
 streamlit run streamlit_app.py --server.port 8501
@@ -1028,6 +1045,7 @@ streamlit run streamlit_app.py --server.port 8501
 ```
 
 #### 14.3.2 サービス起動（Windows Server）
+
 ```powershell
 # 1. サービス開始
 Start-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
@@ -1044,9 +1062,11 @@ Get-Content "logs\service\streamlit_service_$(Get-Date -Format 'yyyyMMdd').log" 
 ### 15.1 よくある問題と対処法
 
 #### 15.1.1 データベース接続エラー
+
 **症状**: `psycopg2.OperationalError: could not connect to server`
 **原因**: データベースサーバの停止、接続設定の誤り
 **対処法**:
+
 ```bash
 # 1. データベース状態確認
 pg_isready -h localhost -p 5432
@@ -1058,10 +1078,12 @@ cat config/archive_config.json | grep database
 telnet localhost 5432
 ```
 
-#### 15.1.2 S3接続エラー
+#### 15.1.2 S3 接続エラー
+
 **症状**: `botocore.exceptions.EndpointConnectionError`
-**原因**: VPCエンドポイント設定、IAM権限の問題
+**原因**: VPC エンドポイント設定、IAM 権限の問題
 **対処法**:
+
 ```bash
 # 1. IAM権限確認
 aws sts get-caller-identity
@@ -1073,10 +1095,12 @@ aws s3 ls s3://your-bucket --endpoint-url https://vpce-xxx.s3.region.vpce.amazon
 aws ec2 describe-vpc-endpoints
 ```
 
-#### 15.1.3 Streamlitアプリエラー
+#### 15.1.3 Streamlit アプリエラー
+
 **症状**: ブラウザで画面が表示されない
 **原因**: ポート競合、ファイアウォール設定
 **対処法**:
+
 ```bash
 # 1. ポート使用状況確認
 netstat -an | grep 8501
@@ -1091,6 +1115,7 @@ netsh advfirewall firewall show rule name="Streamlit"
 ### 15.2 ログ分析
 
 #### 15.2.1 エラーログパターン
+
 ```bash
 # 権限エラー
 grep "Permission denied" logs/*.log
@@ -1103,6 +1128,7 @@ grep "S3" logs/*.log | grep -i error
 ```
 
 #### 15.2.2 パフォーマンス分析
+
 ```bash
 # 処理時間の分析
 grep "処理時間" logs/*.log | tail -10
@@ -1116,20 +1142,24 @@ grep "MB" logs/*.log | grep "アップロード"
 ### 16.1 技術的課題
 
 #### 16.1.1 ネットワーク関連
-**課題**: VPCエンドポイント経由でのS3接続不安定
+
+**課題**: VPC エンドポイント経由での S3 接続不安定
 **対策**: 接続監視機能、自動再接続機能の実装
 
 #### 16.1.2 ストレージ関連
-**課題**: Glacier Deep Archiveからの復元時間（48時間）
+
+**課題**: Glacier Deep Archive からの復元時間（48 時間）
 **対策**: 復元計画の事前策定、優先度管理
 
 ### 16.2 運用課題
 
 #### 16.2.1 容量管理
-**課題**: S3ストレージ容量の予測困難
+
+**課題**: S3 ストレージ容量の予測困難
 **対策**: 定期的な容量監視、容量予測機能の実装
 
 #### 16.2.2 運用負荷
+
 **課題**: 手動運用による負荷
 **対策**: 自動化機能の段階的導入
 
@@ -1140,13 +1170,15 @@ grep "MB" logs/*.log | grep "アップロード"
 ✅ **基本機能**: アーカイブ・復元・履歴管理の基本機能実装完了
 ✅ **動作確認**: 各種環境での動作確認完了
 ✅ **エラーハンドリング**: 主要エラーパターンの対応完了
-✅ **ユーザインターフェース**: Streamlitアプリの基本機能実装完了
+✅ **ユーザインターフェース**: Streamlit アプリの基本機能実装完了
+✅ **サービス化**: Windows Server での本格的なサービス化完了
+✅ **技術課題解決**: SQLAlchemy 2.0 対応、ブラウザ互換性問題等の解決完了
 
 ### 17.2 次のステップ
 
-1. **EC2環境での統合テスト**: 本番環境に近い条件での動作確認
+1. **EC2 環境での統合テスト**: 本番環境に近い条件での動作確認
 2. **単体テスト実装**: 品質保証のためのテストコード作成
-3. **本番環境構築**: AWS環境での本格運用開始
+3. **本番環境構築**: AWS 環境での本格運用開始
 4. **運用手順確定**: 実運用に向けた手順書作成
 
 ### 17.3 成功要因
@@ -1155,12 +1187,23 @@ grep "MB" logs/*.log | grep "アップロード"
 - **実機検証**: 実際の環境での動作確認
 - **エラー対応**: 想定される各種エラーへの対応
 - **ドキュメント整備**: 設計書・手順書の充実
+- **問題解決**: トラブルシューティングを通じた品質向上
 
 ### 17.4 品質保証
 
 - **コードレビュー**: 全機能の動作確認済み
 - **エラーハンドリング**: 各種異常ケースへの対応済み
 - **互換性**: 各種環境・ブラウザでの動作確認済み
-- **セキュリティ**: IAM権限・暗号化通信の実装済み
+- **セキュリティ**: IAM 権限・暗号化通信の実装済み
+- **サービス化**: Windows 環境での永続稼働確認済み
 
-このシステムは、企業内ファイルアーカイブの要件を満たす実用的なソリューションとして設計・実装されており、本番環境での運用に向けた準備が整っています。
+### 17.5 運用可能性
+
+このシステムは、企業内ファイルアーカイブの要件を満たす実用的なソリューションとして設計・実装されており、**Windows Server 環境での本格運用**および**AWS EC2 環境での本番運用**に向けた準備が整っています。
+
+特に以下の点で運用レベルに達しています：
+
+- ✅ **安定性**: 自動再起動機能付きサービス化
+- ✅ **監視性**: 詳細ログ出力・健全性チェック機能
+- ✅ **保守性**: 標準的な管理コマンドでの制御
+- ✅ **拡張性**: 設定変更による柔軟な運用調整
