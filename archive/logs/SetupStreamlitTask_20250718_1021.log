@@ -1,0 +1,32 @@
+PS C:\Users\Administrator> Stop-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
+PS C:\Users\Administrator> Start-ScheduledTask -TaskName "ArchiveHistoryStreamlitService"
+PS C:\Users\Administrator> cd C:\temp\archive\archive_system
+PS C:\temp\archive\archive_system>
+PS C:\temp\archive\archive_system> Get-Content .\logs\service\streamlit_service_20250718.log -Wait
+[2025-07-18 08:48:28] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:48:28] [INFO] Application Path: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:48:28] [INFO] Port: 8501
+[2025-07-18 08:48:28] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:48:28] [ERROR] Application file not found: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:59:01] [INFO] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] Port: 8501
+[2025-07-18 08:59:01] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:59:01] [INFO] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 08:59:01] [INFO] Starting Streamlit process...
+[2025-07-18 08:59:01] [INFO] Streamlit process started (PID: 5788)
+[2025-07-18 08:59:13] [INFO] Streamlit service started successfully
+[2025-07-18 09:51:37] [INFO] === Streamlit Service Starting ===
+[2025-07-18 09:51:37] [INFO] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 09:51:37] [INFO] Port: 8501
+[2025-07-18 09:51:37] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 09:51:37] [INFO] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 09:54:32] [INFO] === Streamlit Service Stop Process Started ===
+[2025-07-18 10:16:58] [INFO] === Streamlit Service Starting ===
+[2025-07-18 10:16:58] [INFO] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 10:16:58] [INFO] Port: 8501
+[2025-07-18 10:16:58] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 10:16:58] [INFO] Waiting for system startup completion...
+[2025-07-18 10:17:58] [INFO] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 10:17:58] [INFO] Python version: Python 3.13.5
+[2025-07-18 10:18:00] [INFO] Streamlit check: Streamlit, version 1.46.1
