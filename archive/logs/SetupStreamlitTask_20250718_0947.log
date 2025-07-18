@@ -1,0 +1,54 @@
+PS C:\temp\archive\archive_system> Get-Content .\logs\service\streamlit.pid -ErrorAction SilentlyContinue
+5788
+PS C:\temp\archive\archive_system> Get-Process -Id 5788 -ErrorAction SilentlyContinue
+
+Handles  NPM(K)    PM(K)      WS(K)     CPU(s)     Id  SI ProcessName
+-------  ------    -----      -----     ------     --  -- -----------
+    232      46   200328      16524       3.67   5788   0 python
+
+
+PS C:\temp\archive\archive_system> Get-Process -Name "python" -ErrorAction SilentlyContinue                                                                                                                                                     Handles  NPM(K)    PM(K)      WS(K)     CPU(s)     Id  SI ProcessName                                                   -------  ------    -----      -----     ------     --  -- -----------                                                       232      46   200328      16528       3.67   5788   0 python
+    251      44   160288     179940      79.05   6836   2 python
+
+
+PS C:\temp\archive\archive_system> Get-WmiObject Win32_Process | Where-Object { $_.ProcessId -eq 5788 } | Select-Object ProcessId, CommandLine
+
+ProcessId CommandLine
+--------- -----------
+     5788 "python" -m streamlit run "C:\temp\archive\archive_system\web\streamlit_app.py" --server.port 8501 --serve...
+
+
+PS C:\temp\archive\archive_system> Invoke-WebRequest -Uri "http://localhost:8501" -TimeoutSec 10 -UseBasicParsing
+
+
+StatusCode        : 200
+StatusDescription : OK
+Content           : <!--
+                     Copyright (c) Streamlit Inc. (2018-2022) Snowflake Inc. (2022-2025)
+
+                     Licensed under the Apache License, Version 2.0 (the "License");
+                     you may not use this file except in compliance with the Lic...
+RawContent        : HTTP/1.1 200 OK
+                    Vary: Accept-Encoding
+                    Accept-Ranges: bytes
+                    Content-Length: 1522
+                    Cache-Control: no-cache
+                    Content-Type: text/html
+                    Date: Fri, 18 Jul 2025 00:46:02 GMT
+                    ETag: "b28299c78af59ae99e13f5...
+Forms             :
+Headers           : {[Vary, Accept-Encoding], [Accept-Ranges, bytes], [Content-Length, 1522], [Cache-Control,
+                    no-cache]...}
+Images            : {}
+InputFields       : {}
+Links             : {}
+ParsedHtml        :
+RawContentLength  : 1522
+
+
+
+PS C:\temp\archive\archive_system>
+PS C:\temp\archive\archive_system> $Response = Invoke-WebRequest -Uri "http://localhost:8501" -TimeoutSec 10
+PS C:\temp\archive\archive_system> $Response.StatusCode
+200
+PS C:\temp\archive\archive_system>
