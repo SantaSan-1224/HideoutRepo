@@ -1,0 +1,44 @@
+PS C:\temp\archive\archive_system> Get-Content .\logs\service\streamlit_service_20250718.log -Tail 50
+[2025-07-18 08:48:28] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:48:28] [INFO] Application Path: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:48:28] [INFO] Port: 8501
+[2025-07-18 08:48:28] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:48:28] [ERROR] Application file not found: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:59:01] [INFO] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] Port: 8501
+[2025-07-18 08:59:01] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:59:01] [INFO] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 08:59:01] [INFO] Starting Streamlit process...
+[2025-07-18 08:59:01] [INFO] Streamlit process started (PID: 5788)
+[2025-07-18 08:59:13] [INFO] Streamlit service started successfully
+PS C:\temp\archive\archive_system> Get-Content .\logs\service\streamlit_service_20250718.log -Tail 20 -ErrorAction SilentlyContinue
+[2025-07-18 08:48:28] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:48:28] [INFO] Application Path: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:48:28] [INFO] Port: 8501
+[2025-07-18 08:48:28] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:48:28] [ERROR] Application file not found: C:\temp\archive\archive_system\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] === Streamlit Service Starting ===
+[2025-07-18 08:59:01] [INFO] Application Path: C:\temp\archive\archive_system\web\streamlit_app.py
+[2025-07-18 08:59:01] [INFO] Port: 8501
+[2025-07-18 08:59:01] [INFO] Log Directory: C:\temp\archive\archive_system\logs\service
+[2025-07-18 08:59:01] [INFO] Working Directory: C:\temp\archive\archive_system\web
+[2025-07-18 08:59:01] [INFO] Starting Streamlit process...
+[2025-07-18 08:59:01] [INFO] Streamlit process started (PID: 5788)
+[2025-07-18 08:59:13] [INFO] Streamlit service started successfully
+PS C:\temp\archive\archive_system> Get-ChildItem .\logs\service\ | Sort-Object LastWriteTime -Descending | Select-Object -First 10
+
+
+    Directory: C:\temp\archive\archive_system\logs\service
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a----         7/18/2025   8:59 AM            977 streamlit_service_20250718.log
+-a----         7/18/2025   8:59 AM              9 streamlit.pid
+
+
+PS C:\temp\archive\archive_system>
+PS C:\temp\archive\archive_system> Get-Content .\logs\service\streamlit.pid -ErrorAction SilentlyContinue
+5788
+PS C:\temp\archive\archive_system>
