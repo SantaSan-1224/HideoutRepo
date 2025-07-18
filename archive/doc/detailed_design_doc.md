@@ -1,4 +1,4 @@
-# アーカイブシステム詳細設計書（完全版）
+# アーカイブシステム詳細設計書（修正版）
 
 ## 1. システム概要
 
@@ -20,14 +20,14 @@ graph TB
     CSV_Archive[📄 アーカイブCSV<br/>対象ディレクトリ]
     CSV_Restore[📄 復元依頼CSV<br/>元ファイルパス+復元先]
 
-    %% 処理サーバ
-    Server[🖥️ AWS EC2<br/>4vCPU, 16GB<br/>処理サーバ]
+    %% 処理サーバ（PostgreSQL・Streamlitも相乗り）
+    Server[🖥️ AWS EC2<br/>4vCPU, 16GB<br/>処理サーバ<br/>PostgreSQL + Streamlit]
 
     %% スクリプト群
     ArchiveScript[🐍 archive_script_main.py<br/>アーカイブ処理]
     RestoreScript[🐍 restore_script_main.py<br/>復元処理]
 
-    %% ファイルサーバ
+    %% ファイルサーバ（AWS環境内）
     FSx[💾 FSx for Windows<br/>File Server<br/>企業内ファイル]
 
     %% S3ストレージ
@@ -36,11 +36,11 @@ graph TB
     %% VPCエンドポイント
     VPC[🔗 VPCエンドポイント<br/>S3接続]
 
-    %% データベース
-    DB[🗄️ PostgreSQL<br/>履歴管理DB]
+    %% データベース（EC2内）
+    DB[🗄️ PostgreSQL<br/>履歴管理DB<br/>（EC2内）]
 
-    %% Streamlitアプリ
-    Streamlit[🌐 Streamlitアプリ<br/>履歴閲覧・検索]
+    %% Streamlitアプリ（EC2内）
+    Streamlit[🌐 Streamlitアプリ<br/>履歴閲覧・検索<br/>（EC2内）]
 
     %% ログ・ステータスファイル
     Logs[📊 ログファイル<br/>処理履歴・エラー]
@@ -56,6 +56,8 @@ graph TB
 
     Server --> ArchiveScript
     Server --> RestoreScript
+    Server --> DB
+    Server --> Streamlit
 
     ArchiveScript --> FSx
     ArchiveScript --> VPC
@@ -76,13 +78,14 @@ graph TB
     %% サブグラフでグループ化
     subgraph "AWS環境"
         Server
+        FSx
         S3
         VPC
         DB
+        Streamlit
     end
 
     subgraph "企業内環境"
-        FSx
         FAST
     end
 
@@ -99,12 +102,12 @@ graph TB
 
 ### 1.3 技術スタック
 
-- **処理サーバ**: AWS EC2（4vCPU、16GB メモリ）
-- **言語**: Python 3.9 以上
-- **データベース**: PostgreSQL 13 以上
-- **Web アプリ**: Streamlit 1.28 以上
+- **処理サーバ**: AWS EC2（4vCPU、16GB メモリ、PostgreSQL・Streamlit 相乗り）
+- **言語**: Python 3.13
+- **データベース**: PostgreSQL 13 以上（EC2 内）
+- **Web アプリ**: Streamlit 1.28 以上（EC2 内）
 - **AWS 連携**: boto3、AWS CLI
-- **ファイルサーバ**: FSx for Windows File Server
+- **ファイルサーバ**: FSx for Windows File Server（AWS 環境内）
 - **テストフレームワーク**: pytest、pytest-cov
 
 ## 2. 実装状況と検証結果
@@ -148,7 +151,7 @@ graph TB
 #### 2.2.1 動作確認済み環境
 
 - **OS**: Windows Server 2022
-- **Python**: 3.9 以上
+- **Python**: 3.13
 - **Streamlit**: 1.46
 - **ブラウザ**: Microsoft Edge 93 以降
 
@@ -238,7 +241,7 @@ CREATE INDEX idx_archive_history_requester_date ON archive_history(requester, re
 ```json
 {
   "database": {
-    "host": "rds-endpoint.region.rds.amazonaws.com",
+    "host": "localhost",
     "port": 5432,
     "database": "archive_system",
     "user": "postgres",
@@ -541,7 +544,7 @@ result = conn.execute(text(query), params)
     "vpc_endpoint_url": "https://bucket.vpce-xxx.s3.region.vpce.amazonaws.com"
   },
   "database": {
-    "host": "rds-endpoint.region.rds.amazonaws.com",
+    "host": "localhost",
     "port": 5432,
     "database": "archive_system",
     "user": "postgres",
@@ -583,7 +586,7 @@ result = conn.execute(text(query), params)
 
 #### 7.2.2 本番環境
 
-- AWS EC2 + RDS + S3
+- AWS EC2 + PostgreSQL（EC2 内） + S3
 - 設定ファイル: `config/prod_config.json`
 
 ## 8. 運用・監視設計
@@ -598,24 +601,26 @@ result = conn.execute(text(query), params)
 [2025-07-18 10:36:11] [INFO] === Streamlit Service Started Successfully ===
 ```
 
-#### 8.1.2 ログローテーション
+#### 8.1.2 ログ管理方針
 
-- **保持期間**: 30 日
-- **圧縮**: 7 日経過後に gzip 圧縮
-- **サイズ制限**: 100MB/ファイル
+- **出力先**: `logs/` ディレクトリ
+- **命名規則**: 日付・時刻ベースのファイル名
+- **レベル**: INFO、WARNING、ERROR
+- **自動削除**: 実装なし（手動管理）
 
-### 8.2 エラー監視
+### 8.2 エラー処理・ログ出力
 
-#### 8.2.1 監視対象
+#### 8.2.1 エラー処理対象
 
-- **処理失敗率**: 5%以上でアラート
-- **処理時間**: 想定時間の 2 倍以上でアラート
-- **ディスク使用量**: 80%以上でアラート
+- **処理失敗**: S3 接続エラー、ファイルアクセスエラー
+- **処理時間**: 想定時間を大幅に超過した場合
+- **システムリソース**: ディスク容量不足など
 
-#### 8.2.2 アラート通知
+#### 8.2.2 ログ出力機能
 
-- **メール通知**: 運用担当者へ
-- **ログ出力**: 詳細なエラー情報
+- **エラーログ**: 詳細なエラー情報をファイル出力
+- **統計ログ**: 処理件数、処理時間、成功・失敗件数
+- **デバッグログ**: 詳細な処理状況（デバッグレベル）
 
 ### 8.3 Windows Server サービス化（実装完了）
 
@@ -727,8 +732,8 @@ param(
 #### 9.2.1 通信暗号化
 
 - **S3 通信**: VPC エンドポイント経由の HTTPS
-- **データベース**: SSL/TLS 接続
-- **Streamlit**: HTTPS 対応（必要に応じて）
+- **データベース**: 同一 EC2 内のローカル接続
+- **Streamlit**: HTTP 接続（EC2 内アクセス）
 
 #### 9.2.2 ログ保護
 
@@ -748,11 +753,11 @@ def mask_sensitive_data(log_message: str) -> str:
 - **操作ログ**: アーカイブ・復元処理の実行
 - **システムログ**: エラー・警告・重要イベント
 
-#### 9.3.2 ログ保持期間
+#### 9.3.2 ログ管理方針
 
-- **アクセスログ**: 1 年
-- **操作ログ**: 7 年（法的要件に応じて）
-- **システムログ**: 3 年
+- **自動削除**: 実装なし（手動管理）
+- **保持期間**: 運用者による手動管理
+- **アーカイブ**: 必要に応じて手動実施
 
 ## 10. パフォーマンス設計
 
@@ -807,19 +812,19 @@ WHERE request_date::date BETWEEN %s AND %s
 ORDER BY request_date DESC;
 ```
 
-### 10.3 リソース監視
+### 10.3 システムリソース管理
 
-#### 10.3.1 システムリソース
+#### 10.3.1 リソース利用方針
 
-- **CPU 使用率**: 平均 70%以下
-- **メモリ使用量**: 物理メモリの 80%以下
-- **ディスク使用量**: 一時領域 90%以下
+- **CPU 使用率**: 処理性能優先（上限設定なし）
+- **メモリ使用量**: EC2 インスタンスサイズに依存
+- **ディスク使用量**: 一時作業領域の手動監視
 
-#### 10.3.2 ネットワーク
+#### 10.3.2 運用監視
 
-- **S3 転送速度**: 100Mbps 以上
-- **データベース応答時間**: 100ms 以下
-- **VPC エンドポイント可用性**: 99.9%以上
+- **手動確認**: 定期的な処理状況確認
+- **ログベース**: 処理ログでの状況把握
+- **必要時対応**: 問題発生時の手動対処
 
 ## 11. 今後の拡張計画
 
@@ -857,7 +862,6 @@ ORDER BY request_date DESC;
 
 - [ ] 並行処理対応
 - [ ] パフォーマンス最適化
-- [ ] 監視・アラート機能
 - [ ] 進捗確認機能の実装
 
 #### 11.2.2 運用改善
@@ -895,7 +899,7 @@ ORDER BY request_date DESC;
 #### 12.1.2 統合テスト環境
 
 - **OS**: AWS EC2 (Windows Server 2022)
-- **データベース**: Amazon RDS for PostgreSQL
+- **データベース**: PostgreSQL（EC2 内）
 - **ストレージ**: Amazon S3
 - **目的**: 統合テスト・性能テスト
 
@@ -946,7 +950,7 @@ def test_file_restoration():
 
 #### 13.1.1 Phase 1: 基盤構築
 
-- AWS 環境構築（EC2、RDS、S3）
+- AWS 環境構築（EC2、S3、FSx for Windows File Server）
 - ネットワーク設定（VPC、エンドポイント）
 - 基本アプリケーションデプロイ
 
@@ -968,14 +972,13 @@ def test_file_restoration():
 
 - [ ] AWS 環境構築完了
 - [ ] アプリケーションデプロイ完了
-- [ ] データベース設定完了
+- [ ] データベース設定完了（EC2 内 PostgreSQL）
 - [ ] ネットワーク設定完了
 - [ ] セキュリティ設定完了
 
 #### 13.2.2 運用要件
 
 - [ ] 運用手順書完成
-- [ ] 監視設定完了
 - [ ] バックアップ設定完了
 - [ ] 障害対応手順完成
 - [ ] 運用者トレーニング完了
@@ -1074,8 +1077,8 @@ pg_isready -h localhost -p 5432
 # 2. 接続設定確認
 cat config/archive_config.json | grep database
 
-# 3. ファイアウォール確認
-telnet localhost 5432
+# 3. PostgreSQLサービス確認
+sudo systemctl status postgresql
 ```
 
 #### 15.1.2 S3 接続エラー
