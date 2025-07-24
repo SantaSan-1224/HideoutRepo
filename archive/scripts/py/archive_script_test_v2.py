@@ -5,16 +5,16 @@
 v1にエラー分類・性能統計機能を追加
 """
 
-import os
-import sys
+import argparse
+import csv
+import datetime
 import json
 import logging
-import argparse
-import datetime
+import os
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import csv
 
 # 設定ファイルのデフォルトパス
 DEFAULT_CONFIG_PATH = "config/archive_config.json"
@@ -117,7 +117,7 @@ class ProgressTrackerV2:
             return "その他エラー"
     
     def _display_progress(self, status: str = ""):
-        """進捗表示（v2: 2行表示）"""
+        """進捗表示（v2修正版: コンパクトな1行表示）"""
         # 基本統計計算
         file_progress = (self.processed_files / self.total_files) * 100
         size_progress = (self.processed_size / self.total_size) * 100 if self.total_size > 0 else 0
@@ -138,57 +138,28 @@ class ProgressTrackerV2:
         # プログレスバー生成
         progress_bar = self._create_progress_bar(file_progress)
         
-        # 1行目: 基本進捗情報
-        line1 = (f"\r{progress_bar} "
-                f"{self.processed_files}/{self.total_files} "
-                f"({file_progress:.1f}% | {size_progress:.1f}%) "
-                f"ETA: {eta} | "
-                f"{status[:30]:<30}")
+        # コンパクトな性能統計
+        avg_speed = self._get_average_speed()
         
-        # 2行目: 詳細統計（v2新機能）
-        line2 = self._generate_detailed_stats()
+        # 1行でコンパクト表示（v1スタイル + v2機能）
+        display_line = (f"\r{progress_bar} "
+                       f"{self.processed_files}/{self.total_files} "
+                       f"({file_progress:.1f}%|{size_progress:.1f}%) "
+                       f"ETA:{eta} "
+                       f"成功:{self.success_files} 失敗:{self.failed_files} "
+                       f"avg:{self._format_speed(avg_speed)} | "
+                       f"{status[:20]:<20}")
         
-        # 2行表示
-        print(f"{line1}\n{line2}", end="", flush=True)
-        
-        # カーソルを前の行に戻す（次回の上書き表示用）
-        print(f"\033[2A", end="")
+        print(display_line, end="", flush=True)
     
-    def _generate_detailed_stats(self) -> str:
-        """詳細統計行の生成（v2新機能）"""
-        # 処理状況サマリー
-        status_summary = f"📋 成功:{self.success_files} 失敗:{self.failed_files}"
-        
-        # エラー分類（発生したエラーのみ表示）
-        error_details = []
-        for error_type, count in self.error_counts.items():
-            if count > 0:
-                error_details.append(f"{error_type}:{count}")
-        
-        if error_details:
-            status_summary += f" ({', '.join(error_details)})"
-        
-        # 性能統計
-        performance_stats = self._generate_performance_stats()
-        
-        return f"{status_summary} | {performance_stats}"
-    
-    def _generate_performance_stats(self) -> str:
-        """性能統計の生成"""
+    def _get_average_speed(self) -> float:
+        """平均速度の計算"""
         if not self.upload_times:
-            return "📈 平均:計算中 最高:計算中 スループット:計算中"
+            return 0.0
         
-        # 平均速度計算
         total_time = sum(self.upload_times)
         total_size = sum(self.file_sizes)
-        avg_speed = total_size / total_time if total_time > 0 else 0
-        
-        # スループット計算（ファイル数/分）
-        throughput = self._calculate_throughput()
-        
-        return (f"📈 平均:{self._format_speed(avg_speed)} "
-                f"最高:{self._format_speed(self.max_speed)} "
-                f"{throughput:.1f}ファイル/分")
+        return total_size / total_time if total_time > 0 else 0.0
     
     def _calculate_throughput(self) -> float:
         """スループット計算（ファイル数/分）"""
@@ -238,7 +209,7 @@ class ProgressTrackerV2:
         total_processed_size = sum(self.file_sizes)
         avg_speed = total_processed_size / elapsed.total_seconds() if elapsed.total_seconds() > 0 else 0
         
-        # カーソルを下に移動（進捗表示の下）
+        # 進捗表示の下に移動
         print(f"\n\n")
         
         print(f"{'='*80}")
@@ -250,7 +221,7 @@ class ProgressTrackerV2:
         print(f"❌ 失敗: {self.failed_files:,}")
         print(f"💾 処理済みサイズ: {self._format_size(total_processed_size)}")
         
-        # v2 新機能: 詳細エラー統計
+        # v2 新機能: 詳細エラー統計（失敗時のみ）
         if self.failed_files > 0:
             print(f"\n📋 エラー分類詳細:")
             for error_type, count in self.error_counts.items():
@@ -853,7 +824,7 @@ class ArchiveProcessorTestV2:
         """データベース接続"""
         try:
             import psycopg2
-            
+
             # データベース設定取得
             db_config = self.config.get('database', {})
             
@@ -982,4 +953,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                    
