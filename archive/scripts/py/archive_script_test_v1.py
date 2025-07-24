@@ -5,16 +5,16 @@
 既存のarchive_script_main.pyに進捗確認機能を追加
 """
 
-import os
-import sys
+import argparse
+import csv
+import datetime
 import json
 import logging
-import argparse
-import datetime
+import os
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import csv
 
 # 設定ファイルのデフォルトパス
 DEFAULT_CONFIG_PATH = "config/archive_config.json"
@@ -595,6 +595,203 @@ class ArchiveProcessorTestV1:
         
         return {'success': False, 'error': '不明なエラー'}
     
+    def create_archived_files(self, results: List[Dict]) -> List[Dict]:
+        """アーカイブ後処理（空ファイル作成→元ファイル削除）"""
+        print(f"📄 アーカイブ後処理開始")
+        
+        # 成功したファイルのみ処理
+        successful_results = [r for r in results if r.get('success', False)]
+        
+        if not successful_results:
+            print("⚠️  S3アップロード成功ファイルがないため、アーカイブ後処理をスキップ")
+            return results
+        
+        print(f"📊 アーカイブ後処理対象: {len(successful_results)}件")
+        
+        archived_suffix = self.config.get('file_server', {}).get('archived_suffix', '_archived')
+        processed_results = []
+        
+        for result in results:
+            if not result.get('success', False):
+                # 失敗したファイルはそのまま
+                processed_results.append(result)
+                continue
+            
+            file_path = result['file_path']
+            
+            try:
+                # 1. 空ファイル作成
+                archived_file_path = f"{file_path}{archived_suffix}"
+                
+                print(f"📄 空ファイル作成: {os.path.basename(archived_file_path)}")
+                
+                # 完全に空のファイル（0バイト）を作成
+                with open(archived_file_path, 'w') as f:
+                    pass  # 何も書かない（空ファイル）
+                
+                # 空ファイル作成確認
+                if not os.path.exists(archived_file_path):
+                    raise Exception("空ファイルの作成に失敗しました")
+                
+                # 2. 空ファイル作成成功後に元ファイル削除
+                print(f"🗑️  元ファイル削除: {os.path.basename(file_path)}")
+                
+                os.remove(file_path)
+                
+                # 元ファイル削除確認
+                if os.path.exists(file_path):
+                    raise Exception("元ファイルの削除に失敗しました")
+                
+                # 成功
+                result['archived_file_path'] = archived_file_path
+                result['archive_completed'] = True
+                
+            except Exception as e:
+                # アーカイブ後処理失敗
+                error_msg = f"アーカイブ後処理失敗: {str(e)}"
+                print(f"❌ {error_msg}: {os.path.basename(file_path)}")
+                
+                # 失敗時のクリーンアップ
+                try:
+                    # 作成済みの空ファイルがあれば削除
+                    if 'archived_file_path' in locals() and os.path.exists(archived_file_path):
+                        os.remove(archived_file_path)
+                        print(f"🧹 作成済み空ファイルを削除: {os.path.basename(archived_file_path)}")
+                except Exception as cleanup_error:
+                    print(f"⚠️  空ファイルクリーンアップ失敗: {cleanup_error}")
+                
+                # 結果を失敗に変更
+                result['success'] = False
+                result['error'] = error_msg
+                result['archive_completed'] = False
+            
+            processed_results.append(result)
+        
+        # 処理結果のサマリー
+        completed_count = len([r for r in processed_results if r.get('archive_completed', False)])
+        failed_count = len([r for r in processed_results if r.get('success', False) and not r.get('archive_completed', False)])
+        
+        print(f"✅ アーカイブ後処理完了: {completed_count}件")
+        print(f"❌ アーカイブ後処理失敗: {failed_count}件")
+        
+        return processed_results
+        
+    def save_to_database(self, results: List[Dict]) -> None:
+        """データベース登録処理"""
+        print(f"🗄️  データベース登録開始")
+        
+        # アーカイブ後処理完了ファイルのみ登録
+        completed_results = [r for r in results if r.get('archive_completed', False)]
+        
+        if not completed_results:
+            print("⚠️  データベース登録対象ファイルがありません")
+            return
+        
+        print(f"📊 データベース登録対象: {len(completed_results)}件")
+        
+        try:
+            # データベース接続
+            conn = self._connect_database()
+            
+            # トランザクション開始
+            with conn:
+                with conn.cursor() as cursor:
+                    # 設定から依頼情報を取得
+                    request_config = self.config.get('request', {})
+                    request_id = self.request_id
+                    requester = request_config.get('requester', '00000000')
+                    
+                    # 現在時刻
+                    current_time = datetime.datetime.now()
+                    
+                    # バケット名を取得（S3 URL生成用）
+                    bucket_name = self.config.get('aws', {}).get('s3_bucket', '')
+                    
+                    # バッチ挿入用のデータ準備
+                    insert_data = []
+                    for result in completed_results:
+                        # S3完全URLの生成
+                        s3_key = result.get('s3_key', '')
+                        s3_url = f"s3://{bucket_name}/{s3_key}" if s3_key else ''
+                        
+                        record = (
+                            request_id,
+                            requester,
+                            current_time,  # request_date
+                            result['file_path'],  # original_file_path
+                            s3_url,  # s3_path
+                            current_time,  # archive_date
+                            result['file_size']
+                        )
+                        insert_data.append(record)
+                    
+                    # バッチ挿入実行
+                    insert_query = """
+                        INSERT INTO archive_history (
+                            request_id, requester, request_date,
+                            original_file_path, s3_path, archive_date, file_size
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """
+                    
+                    cursor.executemany(insert_query, insert_data)
+                    
+                    # 挿入件数確認
+                    inserted_count = cursor.rowcount
+                    print(f"✅ データベース挿入完了: {inserted_count}件")
+            
+            print(f"🗄️  データベース登録完了")
+            
+        except Exception as e:
+            print(f"❌ データベース登録エラー: {str(e)}")
+            # エラーでも処理は継続（アーカイブ自体は成功しているため）
+            
+        finally:
+            # 接続クローズ
+            try:
+                if 'conn' in locals():
+                    conn.close()
+            except Exception:
+                pass
+    
+    def _connect_database(self):
+        """データベース接続"""
+        try:
+            import psycopg2
+
+            # データベース設定取得
+            db_config = self.config.get('database', {})
+            
+            # 接続パラメータ
+            conn_params = {
+                'host': db_config.get('host', 'localhost'),
+                'port': db_config.get('port', 5432),
+                'database': db_config.get('database', 'archive_system'),
+                'user': db_config.get('user', 'postgres'),
+                'password': db_config.get('password', ''),
+                'connect_timeout': db_config.get('timeout', 30)
+            }
+            
+            print(f"🔌 データベース接続: {conn_params['host']}:{conn_params['port']}/{conn_params['database']}")
+            
+            # 接続実行
+            conn = psycopg2.connect(**conn_params)
+            
+            # 自動コミットを無効化（トランザクション管理のため）
+            conn.autocommit = False
+            
+            # 接続テスト
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            
+            print(f"✅ データベース接続成功")
+            return conn
+            
+        except ImportError:
+            raise Exception("psycopg2がインストールされていません。pip install psycopg2-binary を実行してください。")
+        except Exception as e:
+            raise Exception(f"データベース接続失敗: {str(e)}")
+    
     def _format_size(self, bytes_size: int) -> str:
         """ファイルサイズフォーマット"""
         for unit in ['B', 'KB', 'MB', 'GB']:
@@ -631,9 +828,17 @@ class ArchiveProcessorTestV1:
             # 3. S3アップロード（進捗表示付き）
             upload_results = self.archive_to_s3(files)
             
-            # 4. 結果サマリー
-            successful_results = [r for r in upload_results if r.get('success', False)]
-            failed_results = [r for r in upload_results if not r.get('success', False)]
+            # 4. アーカイブ後処理（空ファイル作成→元ファイル削除）
+            print(f"\n📄 アーカイブ後処理開始...")
+            processed_results = self.create_archived_files(upload_results)
+            
+            # 5. データベース登録
+            print(f"🗄️  データベース登録開始...")
+            self.save_to_database(processed_results)
+            
+            # 6. 結果サマリー
+            successful_results = [r for r in processed_results if r.get('success', False)]
+            failed_results = [r for r in processed_results if not r.get('success', False)]
             
             self.stats['processed_files'] = len(successful_results)
             self.stats['failed_files'] = len(failed_results)
