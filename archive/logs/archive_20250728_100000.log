@@ -1,0 +1,41 @@
+c:\temp\archive\archive_system>python archive_script_test_v3.py test_archive_request.csv TEST-V3-004 --simulate-file-lock=0.05
+🔍 アーカイブスクリプト検証版 v3（修正版）
+📋 機能: エラーシミュレーション・詳細統計・進捗表示・出力ファイル修正
+📄 CSV: test_archive_request.csv
+🆔 Request ID: TEST-V3-004
+⚙️  設定ファイル: config/archive_config.json
+🧪 エラーシミュレーション設定:
+   ファイルロック: 5.0%
+   権限エラー: 0.0%
+   ネットワークエラー: 0.0%
+   ファイル消失: 0.0%
+
+🚀 アーカイブ処理開始 (v3修正版) - Request ID: TEST-V3-004
+📄 CSV: test_archive_request.csv
+📄 CSV読み込み開始: test_archive_request.csv
+📊 読み込み行数: 6
+✅ 有効ディレクトリ数: 5
+📁 ファイル収集開始...
+📂 [1/5] \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\tes...
+2025-07-28 09:59:50,270 - archive_processor_test_v3_fixed - ERROR - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\test_data\test_dir_01: ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+   ❌ ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+📂 [2/5] \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\tes...
+2025-07-28 09:59:50,278 - archive_processor_test_v3_fixed - ERROR - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\test_data\test_dir_02: ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+   ❌ ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+📂 [3/5] \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\tes...
+2025-07-28 09:59:50,281 - archive_processor_test_v3_fixed - ERROR - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\test_data\test_dir_03: ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+   ❌ ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+📂 [4/5] \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\tes...
+2025-07-28 09:59:50,285 - archive_processor_test_v3_fixed - ERROR - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\test_data\test_dir_04: ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+   ❌ ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+📂 [5/5] \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\tes...
+2025-07-28 09:59:50,294 - archive_processor_test_v3_fixed - ERROR - ディレクトリ \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\share\test_data\test_dir_05: ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+   ❌ ディレクトリ処理エラー: 'ArchiveProcessorTestV3Fixed' object has no attribute '_is_archived_file'
+
+📊 ファイル収集完了
+   📁 発見ファイル総数: 5
+   ✅ 処理対象ファイル数: 0
+   💾 総ファイルサイズ: 0.0 B
+⚠️  処理対象のファイルが見つかりません
+
+c:\temp\archive\archive_system>
