@@ -283,6 +283,20 @@ class ProgressTrackerV3:
         bar = "█" * filled + "░" * (width - filled)
         return f"[{bar}]"
     
+    def _is_archived_file(self, filename: str, archived_suffix: str) -> bool:
+        """アーカイブ済みファイル判定（_archivedサフィックス対応）"""
+        try:
+            # アーカイブ済みファイルのパターンチェック
+            # 例: test_001.dat_archived
+            if filename.endswith(archived_suffix):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.warning(f"アーカイブ済みファイル判定エラー: {filename} - {str(e)}")
+            return False
+
     def _format_size(self, bytes_size: int) -> str:
         """ファイルサイズフォーマット"""
         for unit in ['B', 'KB', 'MB', 'GB']:
@@ -540,18 +554,27 @@ class ArchiveProcessorTestV3Fixed:
             return {'valid': False, 'error_reason': f'パス検証エラー: {str(e)}'}
         
     def collect_files(self, directories: List[str]) -> List[Dict]:
-        """ファイル収集処理（進捗表示付き）"""
-        self.logger.info("ファイル収集開始")  # 修正: ログ出力追加
+        """ファイル収集処理（アーカイブ済みファイル検出修正版）"""
+        self.logger.info("ファイル収集開始")
         print(f"📁 ファイル収集開始...")
         
         files = []
         exclude_extensions = self.config.get('file_server', {}).get('exclude_extensions', [])
+        archived_suffix = self.config.get('file_server', {}).get('archived_suffix', '_archived')
         max_file_size = self.config.get('processing', {}).get('max_file_size', 10737418240)
+        
+        # 統計情報
+        total_files_found = 0
+        excluded_by_extension = 0
+        excluded_by_archived = 0
+        excluded_by_size = 0
+        
+        self.logger.info(f"除外設定: 拡張子={exclude_extensions}, アーカイブサフィックス='{archived_suffix}'")
         
         # ディレクトリ毎の進捗表示
         for dir_index, directory in enumerate(directories, 1):
             dir_preview = directory[:60] + "..." if len(directory) > 60 else directory
-            self.logger.info(f"ディレクトリ処理中 [{dir_index}/{len(directories)}]: {directory}")  # 修正: ログ出力追加
+            self.logger.info(f"ディレクトリ処理中 [{dir_index}/{len(directories)}]: {directory}")
             print(f"📂 [{dir_index}/{len(directories)}] {dir_preview}")
             
             try:
@@ -559,16 +582,29 @@ class ArchiveProcessorTestV3Fixed:
                 for root, dirs, filenames in os.walk(directory):
                     for filename in filenames:
                         file_path = os.path.join(root, filename)
+                        total_files_found += 1
                         
+                        # 🔧 修正: アーカイブ済みファイルチェック（最優先）
+                        if self._is_archived_file(filename, archived_suffix):
+                            excluded_by_archived += 1
+                            self.logger.debug(f"アーカイブ済みファイルを除外: {filename}")
+                            continue
+                        
+                        # 拡張子チェック
                         _, ext = os.path.splitext(filename)
                         if ext.lower() in exclude_extensions:
+                            excluded_by_extension += 1
+                            self.logger.debug(f"拡張子により除外: {filename} ({ext})")
                             continue
                         
                         try:
                             stat_info = os.stat(file_path)
                             file_size = stat_info.st_size
                             
+                            # ファイルサイズチェック
                             if file_size > max_file_size:
+                                excluded_by_size += 1
+                                self.logger.debug(f"ファイルサイズにより除外: {filename} ({file_size:,} bytes)")
                                 continue
                             
                             file_info = {
@@ -581,23 +617,41 @@ class ArchiveProcessorTestV3Fixed:
                             files.append(file_info)
                             file_count += 1
                             
-                        except OSError:
+                        except OSError as e:
+                            self.logger.warning(f"ファイルアクセスエラー: {file_path} - {str(e)}")
                             continue
                 
-                self.logger.info(f"ディレクトリ {directory}: {file_count}個のファイルを収集")  # 修正: ログ出力追加
+                self.logger.info(f"ディレクトリ {directory}: {file_count}個のファイルを収集")
                 print(f"   ✅ {file_count}個のファイルを収集")
                         
             except Exception as e:
                 error_msg = f"ディレクトリ処理エラー: {str(e)}"
-                self.logger.error(f"ディレクトリ {directory}: {error_msg}")  # 修正: ログ出力追加
+                self.logger.error(f"ディレクトリ {directory}: {error_msg}")
                 print(f"   ❌ {error_msg}")
                 continue
         
         total_size = sum(f['size'] for f in files)
-        self.logger.info(f"ファイル収集完了 - 総ファイル数: {len(files)}, 総サイズ: {total_size}")  # 修正: ログ出力追加
+        
+        # 詳細統計ログ
+        self.logger.info(f"ファイル収集完了")
+        self.logger.info(f"  - 発見ファイル総数: {total_files_found}")
+        self.logger.info(f"  - 処理対象ファイル数: {len(files)}")
+        self.logger.info(f"  - アーカイブ済み除外: {excluded_by_archived}")
+        self.logger.info(f"  - 拡張子除外: {excluded_by_extension}")
+        self.logger.info(f"  - サイズ除外: {excluded_by_size}")
+        self.logger.info(f"  - 総ファイルサイズ: {total_size}")
+        
         print(f"\n📊 ファイル収集完了")
-        print(f"   📁 総ファイル数: {len(files):,}")
+        print(f"   📁 発見ファイル総数: {total_files_found:,}")
+        print(f"   ✅ 処理対象ファイル数: {len(files):,}")
         print(f"   💾 総ファイルサイズ: {self._format_size(total_size)}")
+        
+        if excluded_by_archived > 0:
+            print(f"   🗂️  アーカイブ済み除外: {excluded_by_archived:,}")
+        if excluded_by_extension > 0:
+            print(f"   📄 拡張子除外: {excluded_by_extension:,}")
+        if excluded_by_size > 0:
+            print(f"   📏 サイズ除外: {excluded_by_size:,}")
         
         return files
         
