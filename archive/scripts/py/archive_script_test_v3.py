@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-アーカイブスクリプト検証版 v3 - エラーハンドリング強化版
-v2にエラーシミュレーション機能を追加
+アーカイブスクリプト検証版 v3 - エラーハンドリング強化版（出力ファイル修正版）
+ログファイル・再試行CSV出力の問題を修正
 """
 
 import argparse
@@ -27,15 +27,6 @@ class ErrorSimulator:
                  simulate_permission_error: float = 0.0,
                  simulate_network_error: float = 0.0,
                  simulate_missing_file: float = 0.0):
-        """
-        エラーシミュレーション設定
-        
-        Args:
-            simulate_file_lock: ファイルロックエラー発生率 (0.0-1.0)
-            simulate_permission_error: 権限エラー発生率 (0.0-1.0)
-            simulate_network_error: ネットワークエラー発生率 (0.0-1.0)
-            simulate_missing_file: ファイル消失エラー発生率 (0.0-1.0)
-        """
         self.simulate_file_lock = simulate_file_lock
         self.simulate_permission_error = simulate_permission_error
         self.simulate_network_error = simulate_network_error
@@ -116,10 +107,10 @@ class ProgressTrackerV3:
         self.last_update_time = time.time()
         
         # 進捗表示用の統計
-        self.upload_times = []  # 各ファイルのアップロード時間
-        self.file_sizes = []    # 処理済みファイルサイズ
+        self.upload_times = []
+        self.file_sizes = []
         
-        # v3 新機能: エラー分類（詳細化）
+        # v3 エラー分類（詳細化）
         self.error_counts = {
             "ファイルロック": 0,
             "権限エラー": 0,
@@ -129,7 +120,7 @@ class ProgressTrackerV3:
             "その他エラー": 0
         }
         
-        # v3 新機能: シミュレーション統計
+        # v3 シミュレーション統計
         self.simulated_error_counts = {
             "file_lock": 0,
             "permission_error": 0,
@@ -182,11 +173,11 @@ class ProgressTrackerV3:
         self.processed_files += 1
         self.failed_files += 1
         
-        # v3 新機能: エラー分類（詳細化）
+        # エラー分類（詳細化）
         error_type = self._classify_error(error_msg)
         self.error_counts[error_type] += 1
         
-        # v3 新機能: シミュレーションエラーの統計
+        # シミュレーションエラーの統計
         if is_simulated:
             simulated_type = self._classify_simulated_error(error_msg)
             if simulated_type:
@@ -239,7 +230,7 @@ class ProgressTrackerV3:
         return None
     
     def _display_progress(self, status: str = ""):
-        """進捗表示（v3修正版: シミュレーション統計付き）"""
+        """進捗表示"""
         # 基本統計計算
         file_progress = (self.processed_files / self.total_files) * 100
         size_progress = (self.processed_size / self.total_size) * 100 if self.total_size > 0 else 0
@@ -286,29 +277,6 @@ class ProgressTrackerV3:
         total_size = sum(self.file_sizes)
         return total_size / total_time if total_time > 0 else 0.0
     
-    def _calculate_throughput(self) -> float:
-        """スループット計算（ファイル数/分）"""
-        if len(self.file_completion_times) < 2:
-            return 0.0
-        
-        # 最近の1分間のファイル完了数を計算
-        current_time = time.time()
-        one_minute_ago = current_time - 60
-        
-        recent_completions = [t for t in self.file_completion_times if t >= one_minute_ago]
-        
-        if len(recent_completions) > 0:
-            time_span = current_time - max(one_minute_ago, min(recent_completions))
-            if time_span > 0:
-                return (len(recent_completions) / time_span) * 60
-        
-        # フォールバック: 開始からの平均スループット
-        elapsed_minutes = (current_time - self.start_time.timestamp()) / 60
-        if elapsed_minutes > 0:
-            return len(self.file_completion_times) / elapsed_minutes
-        
-        return 0.0
-    
     def _create_progress_bar(self, percentage: float, width: int = 20) -> str:
         """プログレスバーの生成"""
         filled = int(width * percentage / 100)
@@ -328,7 +296,7 @@ class ProgressTrackerV3:
         return f"{self._format_size(bytes_per_second)}/s"
     
     def print_final_summary(self):
-        """最終サマリーの表示（v3拡張版: シミュレーション統計付き）"""
+        """最終サマリーの表示"""
         elapsed = datetime.datetime.now() - self.start_time
         total_processed_size = sum(self.file_sizes)
         avg_speed = total_processed_size / elapsed.total_seconds() if elapsed.total_seconds() > 0 else 0
@@ -345,14 +313,14 @@ class ProgressTrackerV3:
         print(f"❌ 失敗: {self.failed_files:,}")
         print(f"💾 処理済みサイズ: {self._format_size(total_processed_size)}")
         
-        # v3 新機能: 詳細エラー統計（失敗時のみ）
+        # 詳細エラー統計（失敗時のみ）
         if self.failed_files > 0:
             print(f"\n📋 エラー分類詳細:")
             for error_type, count in self.error_counts.items():
                 if count > 0:
                     print(f"   {error_type}: {count}件")
             
-            # v3 新機能: シミュレーションエラー詳細
+            # シミュレーションエラー詳細
             total_simulated = sum(self.simulated_error_counts.values())
             if total_simulated > 0:
                 print(f"\n🧪 シミュレーションエラー詳細:")
@@ -386,13 +354,10 @@ class ProgressTrackerV3:
             print(f"     最大: {max_time:.2f}秒")
             print(f"     最小: {min_time:.2f}秒")
         
-        final_throughput = self._calculate_throughput()
-        print(f"   最終スループット: {final_throughput:.1f}ファイル/分")
-        
         print(f"{'='*80}\n")
 
-class ArchiveProcessorTestV3:
-    """アーカイブ処理クラス（検証版v3: エラーシミュレーション付き）"""
+class ArchiveProcessorTestV3Fixed:
+    """アーカイブ処理クラス（検証版v3修正版: 出力ファイル修正）"""
     
     def __init__(self, config_path: str = DEFAULT_CONFIG_PATH, error_simulator: ErrorSimulator = None):
         self.config = self.load_config(config_path)
@@ -400,6 +365,7 @@ class ArchiveProcessorTestV3:
         self.error_simulator = error_simulator or ErrorSimulator()
         self.csv_errors = []
         self.progress_tracker = None
+        self.failed_files = []  # 修正: 失敗ファイル記録用
         self.stats = {
             'total_files': 0,
             'processed_files': 0,
@@ -451,9 +417,9 @@ class ArchiveProcessorTestV3:
             return default_config
             
     def setup_logger(self) -> logging.Logger:
-        """ログ設定の初期化"""
-        logger = logging.getLogger('archive_processor_test_v3')
-        logger.setLevel(logging.INFO)
+        """ログ設定の初期化（修正版: ファイル出力を確実に）"""
+        logger = logging.getLogger('archive_processor_test_v3_fixed')
+        logger.setLevel(logging.DEBUG)  # 修正: DEBUGレベルに設定
         logger.handlers.clear()
         
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -464,25 +430,35 @@ class ArchiveProcessorTestV3:
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
         
-        # ファイル出力
+        # ファイル出力（修正: 確実にログを書き込む）
         try:
             log_config = self.config.get('logging', {})
             log_dir = Path(log_config.get('log_directory', 'logs'))
             log_dir.mkdir(exist_ok=True)
             
-            log_file = log_dir / f"archive_test_v3_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            log_file = log_dir / f"archive_test_v3_fixed_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            file_handler.setLevel(logging.DEBUG)
+            file_handler.setLevel(logging.INFO)  # 修正: INFOレベル以上をファイル出力
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
             
+            # ログファイルパスを記録
+            self.log_file_path = str(log_file)
+            
+            # 修正: ログ出力テスト
+            logger.info("===== ログファイル出力テスト =====")
+            logger.info(f"ログファイル: {log_file}")
+            logger.info("ログ設定完了")
+            
         except Exception as e:
             print(f"ログファイル設定エラー: {e}")
+            self.log_file_path = None
         
         return logger
         
     def validate_csv_input(self, csv_path: str) -> Tuple[List[str], List[Dict]]:
         """CSV読み込み・検証処理"""
+        self.logger.info(f"CSV読み込み開始: {csv_path}")  # 修正: ログ出力追加
         print(f"📄 CSV読み込み開始: {csv_path}")
         
         valid_directories = []
@@ -492,6 +468,7 @@ class ArchiveProcessorTestV3:
             with open(csv_path, 'r', encoding='utf-8-sig') as f:
                 lines = f.readlines()
             
+            self.logger.info(f"読み込み行数: {len(lines)}")  # 修正: ログ出力追加
             print(f"📊 読み込み行数: {len(lines)}")
             
             for i, line in enumerate(lines):
@@ -509,6 +486,7 @@ class ArchiveProcessorTestV3:
                 
                 if validation_result['valid']:
                     valid_directories.append(path)
+                    self.logger.debug(f"有効パス追加: {path}")  # 修正: ログ出力追加
                 else:
                     error_item = {
                         'line_number': line_num,
@@ -517,11 +495,15 @@ class ArchiveProcessorTestV3:
                         'original_line': line.rstrip()
                     }
                     self.csv_errors.append(error_item)
+                    self.logger.warning(f"CSV検証エラー 行{line_num}: {validation_result['error_reason']}")  # 修正: ログ出力追加
             
         except Exception as e:
-            print(f"❌ CSV読み込みエラー: {str(e)}")
+            error_msg = f"CSV読み込みエラー: {str(e)}"
+            self.logger.error(error_msg)  # 修正: ログ出力追加
+            print(f"❌ {error_msg}")
             return [], []
         
+        self.logger.info(f"CSV読み込み完了 - 有効ディレクトリ数: {len(valid_directories)}, エラー項目数: {len(self.csv_errors)}")  # 修正: ログ出力追加
         print(f"✅ 有効ディレクトリ数: {len(valid_directories)}")
         if self.csv_errors:
             print(f"⚠️  エラー項目数: {len(self.csv_errors)}")
@@ -559,6 +541,7 @@ class ArchiveProcessorTestV3:
         
     def collect_files(self, directories: List[str]) -> List[Dict]:
         """ファイル収集処理（進捗表示付き）"""
+        self.logger.info("ファイル収集開始")  # 修正: ログ出力追加
         print(f"📁 ファイル収集開始...")
         
         files = []
@@ -568,6 +551,7 @@ class ArchiveProcessorTestV3:
         # ディレクトリ毎の進捗表示
         for dir_index, directory in enumerate(directories, 1):
             dir_preview = directory[:60] + "..." if len(directory) > 60 else directory
+            self.logger.info(f"ディレクトリ処理中 [{dir_index}/{len(directories)}]: {directory}")  # 修正: ログ出力追加
             print(f"📂 [{dir_index}/{len(directories)}] {dir_preview}")
             
             try:
@@ -600,13 +584,17 @@ class ArchiveProcessorTestV3:
                         except OSError:
                             continue
                 
+                self.logger.info(f"ディレクトリ {directory}: {file_count}個のファイルを収集")  # 修正: ログ出力追加
                 print(f"   ✅ {file_count}個のファイルを収集")
                         
             except Exception as e:
-                print(f"   ❌ ディレクトリ処理エラー: {str(e)}")
+                error_msg = f"ディレクトリ処理エラー: {str(e)}"
+                self.logger.error(f"ディレクトリ {directory}: {error_msg}")  # 修正: ログ出力追加
+                print(f"   ❌ {error_msg}")
                 continue
         
         total_size = sum(f['size'] for f in files)
+        self.logger.info(f"ファイル収集完了 - 総ファイル数: {len(files)}, 総サイズ: {total_size}")  # 修正: ログ出力追加
         print(f"\n📊 ファイル収集完了")
         print(f"   📁 総ファイル数: {len(files):,}")
         print(f"   💾 総ファイルサイズ: {self._format_size(total_size)}")
@@ -616,6 +604,7 @@ class ArchiveProcessorTestV3:
     def archive_to_s3(self, files: List[Dict]) -> List[Dict]:
         """S3アップロード処理（v3エラーシミュレーション付き）"""
         if not files:
+            self.logger.warning("アップロード対象ファイルがありません")  # 修正: ログ出力追加
             print("⚠️  アップロード対象ファイルがありません")
             return []
         
@@ -630,6 +619,8 @@ class ArchiveProcessorTestV3:
                 self.config['aws'].get('storage_class', 'STANDARD')
             )
             max_retries = self.config['processing'].get('retry_count', 3)
+            
+            self.logger.info(f"S3アップロード開始 - バケット: {bucket_name}, ストレージクラス: {storage_class}")  # 修正: ログ出力追加
             
             results = []
             
@@ -648,16 +639,19 @@ class ArchiveProcessorTestV3:
                 if self.error_simulator.should_simulate_error("missing_file", file_path):
                     simulated_error = self.error_simulator.simulate_missing_file_error(file_path)
                     is_simulated = True
+                    self.logger.info(f"シミュレーションエラー発生 - ファイル消失: {file_path}")  # 修正: ログ出力追加
                 
                 # ファイルロックエラーシミュレーション（ファイルアクセス時）
                 elif self.error_simulator.should_simulate_error("file_lock", file_path):
                     simulated_error = self.error_simulator.simulate_file_lock_error(file_path)
                     is_simulated = True
+                    self.logger.info(f"シミュレーションエラー発生 - ファイルロック: {file_path}")  # 修正: ログ出力追加
                 
                 # 権限エラーシミュレーション（ファイルアクセス時）
                 elif self.error_simulator.should_simulate_error("permission_error", file_path):
                     simulated_error = self.error_simulator.simulate_permission_error(file_path)
                     is_simulated = True
+                    self.logger.info(f"シミュレーションエラー発生 - 権限エラー: {file_path}")  # 修正: ログ出力追加
                 
                 if simulated_error:
                     # シミュレーションエラーが発生した場合
@@ -675,6 +669,9 @@ class ArchiveProcessorTestV3:
                         'is_simulated_error': True
                     }
                     results.append(result)
+                    
+                    # 修正: 失敗ファイルリストに追加
+                    self.failed_files.append(result)
                     
                     # 進捗表示更新（処理失敗）
                     self.progress_tracker.update_file_failure(
@@ -702,6 +699,7 @@ class ArchiveProcessorTestV3:
                         'error': str(simulated_error)
                     }
                     is_simulated = True
+                    self.logger.info(f"シミュレーションエラー発生 - ネットワークエラー: {file_path}")  # 修正: ログ出力追加
                 
                 # 結果記録
                 result = {
@@ -717,6 +715,13 @@ class ArchiveProcessorTestV3:
                 }
                 results.append(result)
                 
+                # 修正: 失敗ファイルリストに追加
+                if not upload_result['success']:
+                    self.failed_files.append(result)
+                    self.logger.warning(f"アップロード失敗: {file_path} - {upload_result.get('error')}")  # 修正: ログ出力追加
+                else:
+                    self.logger.debug(f"アップロード成功: {file_path} -> {s3_key}")  # 修正: ログ出力追加
+                
                 # 進捗表示更新（処理完了）
                 if upload_result['success']:
                     self.progress_tracker.update_file_success(file_path, file_size, upload_time)
@@ -728,10 +733,14 @@ class ArchiveProcessorTestV3:
             # v3 最終サマリー表示
             self.progress_tracker.print_final_summary()
             
+            self.logger.info(f"S3アップロード完了 - 成功: {len([r for r in results if r['success']])}, 失敗: {len([r for r in results if not r['success']])}")  # 修正: ログ出力追加
+            
             return results
             
         except Exception as e:
-            print(f"\n❌ S3アップロード処理でエラーが発生: {str(e)}")
+            error_msg = f"S3アップロード処理でエラーが発生: {str(e)}"
+            self.logger.error(error_msg)  # 修正: ログ出力追加
+            print(f"\n❌ {error_msg}")
             return [
                 {
                     'file_path': f['path'],
@@ -774,6 +783,8 @@ class ArchiveProcessorTestV3:
             # 接続テスト
             s3_client.head_bucket(Bucket=bucket_name)
             
+            self.logger.info(f"S3クライアント初期化成功 - バケット: {bucket_name}")  # 修正: ログ出力追加
+            
             return s3_client
             
         except ImportError:
@@ -784,6 +795,7 @@ class ArchiveProcessorTestV3:
     def _validate_storage_class(self, storage_class: str) -> str:
         """ストレージクラス検証・調整"""
         if storage_class == 'GLACIER_DEEP_ARCHIVE':
+            self.logger.info(f"ストレージクラス変換: {storage_class} -> DEEP_ARCHIVE")  # 修正: ログ出力追加
             return 'DEEP_ARCHIVE'
         
         valid_classes = ['STANDARD', 'STANDARD_IA', 'GLACIER', 'DEEP_ARCHIVE']
@@ -791,6 +803,7 @@ class ArchiveProcessorTestV3:
         if storage_class in valid_classes:
             return storage_class
         
+        self.logger.warning(f"無効なストレージクラス '{storage_class}' のため 'STANDARD' に変更")  # 修正: ログ出力追加
         return 'STANDARD'
 
     def _generate_s3_key(self, file_path: str) -> str:
@@ -822,6 +835,7 @@ class ArchiveProcessorTestV3:
             return s3_key
             
         except Exception as e:
+            self.logger.error(f"S3キー生成エラー: {file_path} - {str(e)}")  # 修正: ログ出力追加
             import os
             filename = os.path.basename(file_path)
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -854,21 +868,25 @@ class ArchiveProcessorTestV3:
                 if attempt == max_retries - 1:
                     return {'success': False, 'error': f'最大リトライ回数到達: {error_msg}'}
                 
+                self.logger.warning(f"アップロード失敗 (試行 {attempt + 1}/{max_retries}): {error_msg}")  # 修正: ログ出力追加
                 time.sleep(2 ** attempt)  # 指数バックオフ
         
         return {'success': False, 'error': '不明なエラー'}
     
     def create_archived_files(self, results: List[Dict]) -> List[Dict]:
         """アーカイブ後処理（空ファイル作成→元ファイル削除）"""
+        self.logger.info("アーカイブ後処理開始")  # 修正: ログ出力追加
         print(f"📄 アーカイブ後処理開始")
         
         # 成功したファイルのみ処理
         successful_results = [r for r in results if r.get('success', False)]
         
         if not successful_results:
+            self.logger.warning("S3アップロード成功ファイルがないため、アーカイブ後処理をスキップ")  # 修正: ログ出力追加
             print("⚠️  S3アップロード成功ファイルがないため、アーカイブ後処理をスキップ")
             return results
         
+        self.logger.info(f"アーカイブ後処理対象: {len(successful_results)}件")  # 修正: ログ出力追加
         print(f"📊 アーカイブ後処理対象: {len(successful_results)}件")
         
         archived_suffix = self.config.get('file_server', {}).get('archived_suffix', '_archived')
@@ -904,10 +922,12 @@ class ArchiveProcessorTestV3:
                 # 成功
                 result['archived_file_path'] = archived_file_path
                 result['archive_completed'] = True
+                self.logger.debug(f"アーカイブ後処理完了: {file_path}")  # 修正: ログ出力追加
                 
             except Exception as e:
                 # アーカイブ後処理失敗
                 error_msg = f"アーカイブ後処理失敗: {str(e)}"
+                self.logger.error(f"アーカイブ後処理失敗: {file_path} - {str(e)}")  # 修正: ログ出力追加
                 
                 # 失敗時のクリーンアップ
                 try:
@@ -928,6 +948,7 @@ class ArchiveProcessorTestV3:
         completed_count = len([r for r in processed_results if r.get('archive_completed', False)])
         failed_count = len([r for r in processed_results if r.get('success', False) and not r.get('archive_completed', False)])
         
+        self.logger.info(f"アーカイブ後処理完了: 完了 {completed_count}件, 失敗 {failed_count}件")  # 修正: ログ出力追加
         print(f"✅ アーカイブ後処理完了: {completed_count}件")
         if failed_count > 0:
             print(f"❌ アーカイブ後処理失敗: {failed_count}件")
@@ -936,15 +957,18 @@ class ArchiveProcessorTestV3:
         
     def save_to_database(self, results: List[Dict]) -> None:
         """データベース登録処理"""
+        self.logger.info("データベース登録開始")  # 修正: ログ出力追加
         print(f"🗄️  データベース登録開始")
         
         # アーカイブ後処理完了ファイルのみ登録
         completed_results = [r for r in results if r.get('archive_completed', False)]
         
         if not completed_results:
+            self.logger.warning("データベース登録対象ファイルがありません")  # 修正: ログ出力追加
             print("⚠️  データベース登録対象ファイルがありません")
             return
         
+        self.logger.info(f"データベース登録対象: {len(completed_results)}件")  # 修正: ログ出力追加
         print(f"📊 データベース登録対象: {len(completed_results)}件")
         
         try:
@@ -995,12 +1019,16 @@ class ArchiveProcessorTestV3:
                     
                     # 挿入件数確認
                     inserted_count = cursor.rowcount
+                    self.logger.info(f"データベース挿入完了: {inserted_count}件")  # 修正: ログ出力追加
                     print(f"✅ データベース挿入完了: {inserted_count}件")
             
+            self.logger.info("データベース登録完了")  # 修正: ログ出力追加
             print(f"🗄️  データベース登録完了")
             
         except Exception as e:
-            print(f"❌ データベース登録エラー: {str(e)}")
+            error_msg = f"データベース登録エラー: {str(e)}"
+            self.logger.error(error_msg)  # 修正: ログ出力追加
+            print(f"❌ {error_msg}")
             # エラーでも処理は継続（アーカイブ自体は成功しているため）
             
         finally:
@@ -1040,12 +1068,76 @@ class ArchiveProcessorTestV3:
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
             
+            self.logger.info(f"データベース接続成功: {conn_params['host']}:{conn_params['port']}/{conn_params['database']}")  # 修正: ログ出力追加
             return conn
             
         except ImportError:
             raise Exception("psycopg2がインストールされていません。pip install psycopg2-binary を実行してください。")
         except Exception as e:
             raise Exception(f"データベース接続失敗: {str(e)}")
+    
+    def generate_error_csv(self, original_csv_path: str) -> Optional[str]:
+        """修正: 再試行用CSV生成（失敗ファイル用）"""
+        if not self.failed_files:
+            self.logger.info("失敗ファイルがないため、再試行CSVをスキップ")  # 修正: ログ出力追加
+            return None
+            
+        self.logger.info("再試行用CSV生成開始")  # 修正: ログ出力追加
+        print(f"📄 再試行用CSV生成開始")
+        
+        try:
+            # logsディレクトリにエラーCSVを出力
+            log_config = self.config.get('logging', {})
+            log_dir = Path(log_config.get('log_directory', 'logs'))
+            log_dir.mkdir(exist_ok=True)
+            
+            # ファイル名生成
+            original_path = Path(original_csv_path)
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            error_csv_path = log_dir / f"{original_path.stem}_retry_{timestamp}.csv"
+            
+            # 失敗したファイルのディレクトリを収集（重複除去）
+            failed_directories = set()
+            for failed_file in self.failed_files:
+                directory = failed_file.get('directory')
+                if directory:
+                    failed_directories.add(directory)
+            
+            # 再試行用CSVの生成
+            with open(error_csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # ヘッダー行を書き込み
+                writer.writerow(['Directory Path'])
+                
+                # 失敗したディレクトリのみを書き込み
+                for directory in sorted(failed_directories):
+                    writer.writerow([directory])
+            
+            self.logger.info(f"再試行用CSV生成完了: {error_csv_path}")  # 修正: ログ出力追加
+            self.logger.info(f"再試行対象ディレクトリ数: {len(failed_directories)}")  # 修正: ログ出力追加
+            self.logger.info(f"失敗ファイル数: {len(self.failed_files)}")  # 修正: ログ出力追加
+            
+            print(f"✅ 再試行用CSV生成完了: {error_csv_path}")
+            print(f"📊 再試行対象ディレクトリ数: {len(failed_directories)}")
+            
+            # エラー理由の統計をログに出力
+            error_summary = {}
+            for item in self.failed_files:
+                error_type = item.get('error', '不明なエラー')
+                error_summary[error_type] = error_summary.get(error_type, 0) + 1
+            
+            self.logger.info("エラー理由の内訳:")  # 修正: ログ出力追加
+            for error_type, count in error_summary.items():
+                self.logger.info(f"  - {error_type}: {count}件")  # 修正: ログ出力追加
+            
+            return str(error_csv_path)
+            
+        except Exception as e:
+            error_msg = f"再試行用CSV生成失敗: {str(e)}"
+            self.logger.error(error_msg)  # 修正: ログ出力追加
+            print(f"❌ {error_msg}")
+            return None
     
     def _format_size(self, bytes_size: int) -> str:
         """ファイルサイズフォーマット"""
@@ -1056,24 +1148,30 @@ class ArchiveProcessorTestV3:
         return f"{bytes_size:.1f} TB"
         
     def run(self, csv_path: str, request_id: str) -> int:
-        """メイン処理実行"""
+        """メイン処理実行（修正版: 出力ファイル生成確実化）"""
         self.stats['start_time'] = datetime.datetime.now()
         self.request_id = request_id
         
         try:
-            print(f"🚀 アーカイブ処理開始 (v3) - Request ID: {request_id}")
+            self.logger.info(f"===== アーカイブ処理開始 (v3修正版) =====")  # 修正: ログ出力追加
+            self.logger.info(f"Request ID: {request_id}")  # 修正: ログ出力追加
+            self.logger.info(f"CSV: {csv_path}")  # 修正: ログ出力追加
+            
+            print(f"🚀 アーカイブ処理開始 (v3修正版) - Request ID: {request_id}")
             print(f"📄 CSV: {csv_path}")
             
             # 1. CSV読み込み・検証
             directories, csv_errors = self.validate_csv_input(csv_path)
             
             if not directories:
+                self.logger.error("処理対象のディレクトリが見つかりません")  # 修正: ログ出力追加
                 print("❌ 処理対象のディレクトリが見つかりません")
                 return 1
                 
             # 2. ファイル収集
             files = self.collect_files(directories)
             if not files:
+                self.logger.warning("処理対象のファイルが見つかりません")  # 修正: ログ出力追加
                 print("⚠️  処理対象のファイルが見つかりません")
                 return 0
                 
@@ -1091,7 +1189,19 @@ class ArchiveProcessorTestV3:
             print(f"🗄️  データベース登録開始...")
             self.save_to_database(processed_results)
             
-            # 6. 結果サマリー
+            # 6. 修正: 再試行用CSV生成（失敗ファイルがある場合）
+            if self.failed_files:
+                self.logger.info(f"失敗ファイルが {len(self.failed_files)}件 あるため、再試行用CSV生成")  # 修正: ログ出力追加
+                retry_csv_path = self.generate_error_csv(csv_path)
+                if retry_csv_path:
+                    print(f"📄 再試行用CSV生成: {retry_csv_path}")
+                else:
+                    print(f"❌ 再試行用CSV生成失敗")
+            else:
+                self.logger.info("失敗ファイルがないため、再試行用CSVはスキップ")  # 修正: ログ出力追加
+                print(f"✅ 全ファイル成功のため、再試行用CSVは不要")
+            
+            # 7. 結果サマリー
             successful_results = [r for r in processed_results if r.get('success', False)]
             failed_results = [r for r in processed_results if not r.get('success', False)]
             simulated_results = [r for r in processed_results if r.get('is_simulated_error', False)]
@@ -1099,7 +1209,13 @@ class ArchiveProcessorTestV3:
             self.stats['processed_files'] = len(successful_results)
             self.stats['failed_files'] = len(failed_results)
             
-            print(f"🎉 アーカイブ処理完了! (v3)")
+            self.logger.info(f"===== アーカイブ処理完了 =====")  # 修正: ログ出力追加
+            self.logger.info(f"成功: {len(successful_results)}件")  # 修正: ログ出力追加
+            self.logger.info(f"失敗: {len(failed_results)}件")  # 修正: ログ出力追加
+            if simulated_results:
+                self.logger.info(f"シミュレーション失敗: {len(simulated_results)}件")  # 修正: ログ出力追加
+            
+            print(f"🎉 アーカイブ処理完了! (v3修正版)")
             print(f"✅ 成功: {len(successful_results)}件")
             print(f"❌ 失敗: {len(failed_results)}件")
             if simulated_results:
@@ -1108,30 +1224,40 @@ class ArchiveProcessorTestV3:
             # エラーシミュレーション統計
             error_stats = self.error_simulator.get_error_stats()
             if error_stats['total_simulated_errors'] > 0:
+                self.logger.info("エラーシミュレーション統計:")  # 修正: ログ出力追加
                 print(f"\n🧪 エラーシミュレーション統計:")
                 for error_type, count in error_stats.items():
                     if error_type != 'total_simulated_errors' and count > 0:
+                        self.logger.info(f"   {error_type}: {count}件")  # 修正: ログ出力追加
                         print(f"   {error_type}: {count}件")
+                self.logger.info(f"   合計: {error_stats['total_simulated_errors']}件")  # 修正: ログ出力追加
                 print(f"   合計: {error_stats['total_simulated_errors']}件")
+            
+            # 修正: ログファイルパス表示
+            if hasattr(self, 'log_file_path') and self.log_file_path:
+                print(f"\n📋 ログファイル: {self.log_file_path}")
             
             return 0
             
         except Exception as e:
-            print(f"\n❌ アーカイブ処理中にエラーが発生しました: {str(e)}")
+            error_msg = f"アーカイブ処理中にエラーが発生しました: {str(e)}"
+            self.logger.error(error_msg)  # 修正: ログ出力追加
+            print(f"\n❌ {error_msg}")
             return 1
             
         finally:
             self.stats['end_time'] = datetime.datetime.now()
+            self.logger.info(f"処理終了時刻: {self.stats['end_time']}")  # 修正: ログ出力追加
 
 def main():
     """メイン関数"""
-    parser = argparse.ArgumentParser(description='アーカイブスクリプト検証版v3（エラーハンドリング強化版）')
+    parser = argparse.ArgumentParser(description='アーカイブスクリプト検証版v3（エラーハンドリング強化版・出力ファイル修正版）')
     parser.add_argument('csv_path', help='対象ディレクトリを記載したCSVファイルのパス')
     parser.add_argument('request_id', help='アーカイブ依頼ID')
     parser.add_argument('--config', default=DEFAULT_CONFIG_PATH, 
                        help=f'設定ファイルのパス (デフォルト: {DEFAULT_CONFIG_PATH})')
     
-    # v3 新機能: エラーシミュレーション設定
+    # v3 エラーシミュレーション設定
     parser.add_argument('--simulate-file-lock', type=float, default=0.0, metavar='0.0-1.0',
                        help='ファイルロックエラー発生率 (0.0-1.0, デフォルト: 0.0)')
     parser.add_argument('--simulate-permission-error', type=float, default=0.0, metavar='0.0-1.0',
@@ -1159,8 +1285,8 @@ def main():
         print(f"❌ CSVファイルが見つかりません: {args.csv_path}")
         sys.exit(1)
     
-    print(f"🔍 アーカイブスクリプト検証版 v3")
-    print(f"📋 機能: エラーシミュレーション・詳細統計・進捗表示")
+    print(f"🔍 アーカイブスクリプト検証版 v3（修正版）")
+    print(f"📋 機能: エラーシミュレーション・詳細統計・進捗表示・出力ファイル修正")
     print(f"📄 CSV: {args.csv_path}")
     print(f"🆔 Request ID: {args.request_id}")
     print(f"⚙️  設定ファイル: {args.config}")
@@ -1174,7 +1300,7 @@ def main():
     )
     
     # アーカイブ処理の実行
-    processor = ArchiveProcessorTestV3(args.config, error_simulator)
+    processor = ArchiveProcessorTestV3Fixed(args.config, error_simulator)
     exit_code = processor.run(args.csv_path, args.request_id)
     
     sys.exit(exit_code)
