@@ -370,8 +370,8 @@ class ArchiveProcessorTestV3:
                 "log_level": "INFO"
             },
             "file_server": {
-                "exclude_extensions": [".tmp", ".lock", ".bak"],
-                "archived_suffix": "_archived.txt"
+                "exclude_extensions": [".tmp", ".lock", ".bak", ".archived"],
+                "archived_suffix": ".archived"
             },
             "processing": {
                 "max_file_size": 10737418240,
