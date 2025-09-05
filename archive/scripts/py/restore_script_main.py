@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-復元スクリプト メイン処理
+復元スクリプト（ディレクトリ・ファイル混合対応版）
 AWS S3 Glacier Deep Archiveからファイルサーバへの復元処理
 """
 
-import os
-import sys
+import argparse
+import csv
+import datetime
 import json
 import logging
-import argparse
-import datetime
+import os
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import csv
 
 # 設定ファイルのデフォルトパス
 DEFAULT_CONFIG_PATH = "config/archive_config.json"
@@ -27,7 +27,10 @@ class RestoreProcessor:
         self.logger = self.setup_logger()
         self.csv_errors = []  # CSV検証エラーを記録
         self.stats = {
-            'total_files': 0,
+            'total_requests': 0,
+            'directory_requests': 0,
+            'file_requests': 0,
+            'total_files_found': 0,
             'restore_requested': 0,
             'restore_completed': 0,
             'failed_files': 0,
@@ -46,7 +49,10 @@ class RestoreProcessor:
             "restore": {
                 "check_interval": 300,  # 5分間隔
                 "max_wait_time": 86400,  # 24時間
-                "restore_tier": "Standard"  # Standard, Expedited, Bulk
+                "restore_tier": "Standard",  # Standard, Expedited, Bulk
+                "download_retry_count": 3,
+                "skip_existing_files": True,
+                "temp_download_directory": "temp_downloads"
             },
             "processing": {
                 "retry_count": 3
@@ -116,7 +122,7 @@ class RestoreProcessor:
         
     def validate_csv_input(self, csv_path: str) -> Tuple[List[Dict], List[Dict]]:
         """
-        復元依頼CSV読み込み・検証処理
+        復元依頼CSV読み込み・検証処理（ディレクトリ・ファイル混合対応）
         
         Returns:
             Tuple[List[Dict], List[Dict]]: (有効な復元依頼リスト, エラー項目リスト)
@@ -141,45 +147,71 @@ class RestoreProcessor:
                     continue
                 
                 # ヘッダー行をスキップ
-                if i == 0 and ('復元対象' in clean_line or 'S3パス' in clean_line or 's3://' not in clean_line):
+                if i == 0 and ('復元対象' in clean_line or 'S3パス' in clean_line or 
+                               'restore' in clean_line.lower() or 'path' in clean_line.lower()):
                     self.logger.info(f"行 {line_num}: ヘッダー行をスキップ")
                     continue
                 
                 # CSV行を分割
                 try:
                     row = next(csv.reader([clean_line]))
-                    if len(row) < 2:
+                    
+                    # 2列または3列の形式に対応
+                    if len(row) == 2:
+                        # 従来形式: 復元対象パス, 復元先ディレクトリ
+                        restore_path = row[0].strip()
+                        restore_dir = row[1].strip()
+                        # 自動判定: パスがディレクトリ区切り文字で終わればディレクトリモード
+                        if restore_path.endswith(('\\', '/')):
+                            restore_mode = 'directory'
+                        else:
+                            restore_mode = 'file'
+                    elif len(row) == 3:
+                        # 新形式: 復元対象パス, 復元先ディレクトリ, 復元モード
+                        restore_path = row[0].strip()
+                        restore_dir = row[1].strip()
+                        restore_mode = row[2].strip().lower()
+                    else:
                         error_item = {
                             'line_number': line_num,
                             'content': clean_line,
-                            'error_reason': 'カラム数が不足しています（元ファイルパス, 復元先ディレクトリが必要）',
+                            'error_reason': 'カラム数が不正です（2列または3列が必要）',
                             'original_line': line.rstrip()
                         }
                         self.csv_errors.append(error_item)
-                        self.logger.error(f"行 {line_num}: カラム数不足 ✗")
+                        self.logger.error(f"行 {line_num}: カラム数不正 ✗")
                         continue
                     
-                    original_file_path = row[0].strip()
-                    restore_dir = row[1].strip()
+                    # 復元モードの検証
+                    if restore_mode not in ['file', 'directory']:
+                        error_item = {
+                            'line_number': line_num,
+                            'content': clean_line,
+                            'error_reason': f'復元モードが不正です: {restore_mode} (file または directory が必要)',
+                            'original_line': line.rstrip()
+                        }
+                        self.csv_errors.append(error_item)
+                        self.logger.error(f"行 {line_num}: 復元モード不正 ✗")
+                        continue
                     
                     # 復元依頼の検証
-                    validation_result = self._validate_restore_request(original_file_path, restore_dir)
+                    validation_result = self._validate_restore_request(restore_path, restore_dir, restore_mode)
                     
                     if validation_result['valid']:
                         request_item = {
                             'line_number': line_num,
-                            'original_file_path': original_file_path,
+                            'restore_path': restore_path,
                             'restore_directory': restore_dir,
-                            's3_path': None,  # データベース検索で取得
-                            'bucket': None,   # S3パス取得後に設定
-                            'key': None       # S3パス取得後に設定
+                            'restore_mode': restore_mode,
+                            'files_found': [],  # データベース検索で設定
+                            'total_files_found': 0
                         }
                         valid_requests.append(request_item)
-                        self.logger.info(f"行 {line_num}: 有効な復元依頼追加 ✓")
+                        self.logger.info(f"行 {line_num}: 有効な復元依頼追加 ({restore_mode}モード) ✓")
                     else:
                         error_item = {
                             'line_number': line_num,
-                            'content': f"{original_file_path} -> {restore_dir}",
+                            'content': f"{restore_path} -> {restore_dir} ({restore_mode})",
                             'error_reason': validation_result['error_reason'],
                             'original_line': line.rstrip()
                         }
@@ -200,22 +232,32 @@ class RestoreProcessor:
             self.logger.error(f"CSV読み込みエラー: {str(e)}")
             return [], []
         
+        # 統計更新
+        directory_count = len([r for r in valid_requests if r['restore_mode'] == 'directory'])
+        file_count = len([r for r in valid_requests if r['restore_mode'] == 'file'])
+        
         self.logger.info(f"CSV読み込み完了")
         self.logger.info(f"  - 有効な復元依頼数: {len(valid_requests)}")
+        self.logger.info(f"    - ディレクトリ復元: {directory_count}件")
+        self.logger.info(f"    - ファイル復元: {file_count}件")
         self.logger.info(f"  - エラー項目数: {len(self.csv_errors)}")
+        
+        self.stats['total_requests'] = len(valid_requests)
+        self.stats['directory_requests'] = directory_count
+        self.stats['file_requests'] = file_count
         
         return valid_requests, self.csv_errors
     
-    def _validate_restore_request(self, original_file_path: str, restore_dir: str) -> Dict:
+    def _validate_restore_request(self, restore_path: str, restore_dir: str, restore_mode: str) -> Dict:
         """復元依頼の検証"""
         try:
-            # 元ファイルパスの形式チェック
-            if not original_file_path:
-                return {'valid': False, 'error_reason': '元ファイルパスが指定されていません'}
+            # 復元対象パスの形式チェック
+            if not restore_path:
+                return {'valid': False, 'error_reason': '復元対象パスが指定されていません'}
             
             # パス長制限チェック
-            if len(original_file_path) > 260:
-                return {'valid': False, 'error_reason': 'ファイルパスが長すぎます（260文字制限）'}
+            if len(restore_path) > 260:
+                return {'valid': False, 'error_reason': '復元対象パスが長すぎます（260文字制限）'}
             
             # 復元先ディレクトリの検証
             if not restore_dir:
@@ -232,14 +274,21 @@ class RestoreProcessor:
             if not os.access(restore_dir, os.W_OK):
                 return {'valid': False, 'error_reason': '復元先ディレクトリへの書き込み権限がありません'}
             
+            # ディレクトリモードの場合の特別なチェック
+            if restore_mode == 'directory':
+                # ディレクトリパスが適切に終わっているかチェック
+                if not restore_path.endswith(('\\', '/')):
+                    # 自動的に区切り文字を追加（警告ログ出力）
+                    self.logger.warning(f"ディレクトリパスに区切り文字を追加: {restore_path} -> {restore_path}\\")
+            
             return {'valid': True, 'error_reason': None}
             
         except Exception as e:
             return {'valid': False, 'error_reason': f'検証エラー: {str(e)}'}
     
-    def lookup_s3_paths_from_database(self, restore_requests: List[Dict]) -> List[Dict]:
-        """データベースから元ファイルパスに対応するS3パスを検索"""
-        self.logger.info("データベースからS3パス検索開始")
+    def lookup_files_from_database(self, restore_requests: List[Dict]) -> List[Dict]:
+        """データベースから復元対象ファイルを検索（ディレクトリ・ファイル混合対応）"""
+        self.logger.info("データベースからファイル検索開始")
         
         try:
             # データベース接続
@@ -248,35 +297,77 @@ class RestoreProcessor:
             with conn:
                 with conn.cursor() as cursor:
                     for request in restore_requests:
-                        original_path = request['original_file_path']
+                        restore_path = request['restore_path']
+                        restore_mode = request['restore_mode']
                         
-                        # S3パス検索
-                        cursor.execute(
-                            "SELECT s3_path, archive_date FROM archive_history WHERE original_file_path = %s",
-                            (original_path,)
-                        )
-                        
-                        result = cursor.fetchone()
-                        if result:
-                            s3_path, archive_date = result
-                            request['s3_path'] = s3_path
-                            request['bucket'] = self._extract_bucket_from_s3_path(s3_path)
-                            request['key'] = self._extract_key_from_s3_path(s3_path)
-                            request['archive_date'] = str(archive_date)
-                            self.logger.info(f"S3パス見つかりました: {original_path} -> {s3_path}")
+                        if restore_mode == 'directory':
+                            # ディレクトリ復元: LIKE検索
+                            self.logger.info(f"ディレクトリ検索: {restore_path}")
+                            
+                            # パスの正規化（末尾の区切り文字を確保）
+                            search_path = restore_path
+                            if not search_path.endswith(('\\', '/')):
+                                search_path += '\\'
+                            
+                            cursor.execute(
+                                "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path LIKE %s ORDER BY original_file_path",
+                                (f"{search_path}%",)
+                            )
+                            
                         else:
-                            request['s3_path'] = None
+                            # ファイル復元: 完全一致検索
+                            self.logger.info(f"ファイル検索: {restore_path}")
+                            
+                            cursor.execute(
+                                "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path = %s",
+                                (restore_path,)
+                            )
+                        
+                        results = cursor.fetchall()
+                        
+                        if results:
+                            files_found = []
+                            for row in results:
+                                original_path, s3_path, archive_date, file_size = row
+                                
+                                file_info = {
+                                    'original_file_path': original_path,
+                                    's3_path': s3_path,
+                                    'bucket': self._extract_bucket_from_s3_path(s3_path),
+                                    'key': self._extract_key_from_s3_path(s3_path),
+                                    'archive_date': str(archive_date),
+                                    'file_size': file_size,
+                                    'restore_status': 'pending',
+                                    'relative_path': self._calculate_relative_path(original_path, restore_path, restore_mode)
+                                }
+                                files_found.append(file_info)
+                            
+                            request['files_found'] = files_found
+                            request['total_files_found'] = len(files_found)
+                            
+                            self.logger.info(f"ファイル検索完了: {restore_path} -> {len(files_found)}件")
+                            
+                        else:
+                            request['files_found'] = []
+                            request['total_files_found'] = 0
                             request['error'] = 'データベースにアーカイブ履歴が見つかりません'
-                            self.logger.error(f"S3パス見つからず: {original_path}")
+                            self.logger.error(f"ファイル見つからず: {restore_path}")
             
-            self.logger.info("データベースS3パス検索完了")
+            # 統計更新
+            total_files = sum(req.get('total_files_found', 0) for req in restore_requests)
+            self.stats['total_files_found'] = total_files
+            
+            self.logger.info("データベースファイル検索完了")
+            self.logger.info(f"  - 総検出ファイル数: {total_files}件")
+            
             return restore_requests
             
         except Exception as e:
             self.logger.error(f"データベース検索エラー: {str(e)}")
             # エラー時は全リクエストにエラーマーク
             for request in restore_requests:
-                request['s3_path'] = None
+                request['files_found'] = []
+                request['total_files_found'] = 0
                 request['error'] = f'データベース接続エラー: {str(e)}'
             return restore_requests
         
@@ -287,11 +378,41 @@ class RestoreProcessor:
             except Exception:
                 pass
     
+    def _calculate_relative_path(self, original_path: str, restore_path: str, restore_mode: str) -> str:
+        """復元時の相対パスを計算（階層構造保持用）"""
+        try:
+            if restore_mode == 'file':
+                # ファイル復元の場合はファイル名のみ
+                return os.path.basename(original_path)
+            else:
+                # ディレクトリ復元の場合は相対パスを計算
+                # 例: original_path = "\\server\share\project\sub\file.txt"
+                #     restore_path = "\\server\share\project\"
+                #     -> relative_path = "sub\file.txt"
+                
+                # パスの正規化
+                orig_normalized = original_path.replace('/', '\\')
+                restore_normalized = restore_path.replace('/', '\\')
+                
+                if not restore_normalized.endswith('\\'):
+                    restore_normalized += '\\'
+                
+                if orig_normalized.startswith(restore_normalized):
+                    relative = orig_normalized[len(restore_normalized):]
+                    return relative if relative else os.path.basename(original_path)
+                else:
+                    # パスが一致しない場合はファイル名のみ
+                    return os.path.basename(original_path)
+                    
+        except Exception as e:
+            self.logger.warning(f"相対パス計算エラー: {e}")
+            return os.path.basename(original_path)
+    
     def _connect_database(self):
         """データベース接続（アーカイブスクリプトと共通）"""
         try:
             import psycopg2
-            
+
             # データベース設定取得
             db_config = self.config.get('database', {})
             
@@ -340,7 +461,10 @@ class RestoreProcessor:
         """S3復元リクエスト送信"""
         self.logger.info("S3復元リクエスト送信開始")
         
-        if not restore_requests:
+        # ファイルが見つかったリクエストのみ処理
+        valid_requests = [req for req in restore_requests if req.get('total_files_found', 0) > 0]
+        
+        if not valid_requests:
             self.logger.info("復元リクエスト対象がありません")
             return restore_requests
         
@@ -354,59 +478,54 @@ class RestoreProcessor:
             
             self.logger.info(f"S3復元リクエスト送信")
             self.logger.info(f"復元ティア: {restore_tier}")
-            self.logger.info(f"処理対象ファイル数: {len(restore_requests)}")
             
             successful_requests = 0
             failed_requests = 0
             
-            for request in restore_requests:
-                bucket = request.get('bucket')
-                key = request.get('key')
-                original_path = request.get('original_file_path')
+            for request in valid_requests:
+                self.logger.info(f"復元リクエスト処理中: {request['restore_path']} ({request['total_files_found']}件)")
                 
-                if not bucket or not key:
-                    request['restore_status'] = 'failed'
-                    request['error'] = 'S3パス情報が不完全です'
-                    failed_requests += 1
-                    self.logger.error(f"✗ 復元リクエスト失敗: {original_path} - S3パス情報不完全")
-                    continue
-                
-                try:
-                    # S3復元リクエスト送信
-                    self.logger.info(f"復元リクエスト送信中: {bucket}/{key}")
+                for file_info in request['files_found']:
+                    bucket = file_info['bucket']
+                    key = file_info['key']
+                    original_path = file_info['original_file_path']
                     
-                    s3_client.restore_object(
-                        Bucket=bucket,
-                        Key=key,
-                        RestoreRequest={
-                            'Days': 7,  # 復元後の保持日数
-                            'GlacierJobParameters': {
-                                'Tier': restore_tier
+                    try:
+                        # S3復元リクエスト送信
+                        self.logger.debug(f"復元リクエスト送信中: {bucket}/{key}")
+                        
+                        s3_client.restore_object(
+                            Bucket=bucket,
+                            Key=key,
+                            RestoreRequest={
+                                'Days': 7,  # 復元後の保持日数
+                                'GlacierJobParameters': {
+                                    'Tier': restore_tier
+                                }
                             }
-                        }
-                    )
-                    
-                    # 成功
-                    request['restore_status'] = 'requested'
-                    request['restore_request_time'] = datetime.datetime.now().isoformat()
-                    request['restore_tier'] = restore_tier
-                    successful_requests += 1
-                    self.logger.info(f"✓ 復元リクエスト送信成功: {original_path}")
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    
-                    # 既に復元中の場合は正常として扱う
-                    if 'RestoreAlreadyInProgress' in error_msg:
-                        request['restore_status'] = 'already_in_progress'
-                        request['restore_request_time'] = datetime.datetime.now().isoformat()
+                        )
+                        
+                        # 成功
+                        file_info['restore_status'] = 'requested'
+                        file_info['restore_request_time'] = datetime.datetime.now().isoformat()
+                        file_info['restore_tier'] = restore_tier
                         successful_requests += 1
-                        self.logger.info(f"✓ 復元リクエスト既に進行中: {original_path}")
-                    else:
-                        request['restore_status'] = 'failed'
-                        request['error'] = error_msg
-                        failed_requests += 1
-                        self.logger.error(f"✗ 復元リクエスト失敗: {original_path} - {error_msg}")
+                        self.logger.debug(f"✓ 復元リクエスト送信成功: {original_path}")
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        
+                        # 既に復元中の場合は正常として扱う
+                        if 'RestoreAlreadyInProgress' in error_msg:
+                            file_info['restore_status'] = 'already_in_progress'
+                            file_info['restore_request_time'] = datetime.datetime.now().isoformat()
+                            successful_requests += 1
+                            self.logger.debug(f"✓ 復元リクエスト既に進行中: {original_path}")
+                        else:
+                            file_info['restore_status'] = 'failed'
+                            file_info['error'] = error_msg
+                            failed_requests += 1
+                            self.logger.error(f"✗ 復元リクエスト失敗: {original_path} - {error_msg}")
             
             # 統計更新
             self.stats['restore_requested'] = successful_requests
@@ -422,8 +541,9 @@ class RestoreProcessor:
             self.logger.error(f"S3復元リクエスト処理でエラーが発生: {str(e)}")
             # 全リクエストを失敗としてマーク
             for request in restore_requests:
-                request['restore_status'] = 'failed'
-                request['error'] = f'S3初期化エラー: {str(e)}'
+                for file_info in request.get('files_found', []):
+                    file_info['restore_status'] = 'failed'
+                    file_info['error'] = f'S3初期化エラー: {str(e)}'
             return restore_requests
     
     def _initialize_s3_client(self):
@@ -431,7 +551,7 @@ class RestoreProcessor:
         try:
             import boto3
             from botocore.config import Config
-            
+
             # AWS設定の取得
             aws_config = self.config.get('aws', {})
             region = aws_config.get('region', 'ap-northeast-1').strip()
@@ -466,19 +586,18 @@ class RestoreProcessor:
         """復元完了確認処理"""
         self.logger.info("復元完了確認開始")
         
-        if not restore_requests:
-            self.logger.info("復元確認対象がありません")
-            return restore_requests
+        # 復元リクエスト済みのファイルを収集
+        pending_files = []
+        for request in restore_requests:
+            for file_info in request.get('files_found', []):
+                if file_info.get('restore_status') in ['requested', 'already_in_progress']:
+                    pending_files.append(file_info)
         
-        # 復元リクエスト済みのファイルのみ確認
-        pending_requests = [req for req in restore_requests 
-                           if req.get('restore_status') in ['requested', 'already_in_progress']]
-        
-        if not pending_requests:
+        if not pending_files:
             self.logger.info("復元確認対象ファイルがありません")
             return restore_requests
         
-        self.logger.info(f"復元ステータス確認対象: {len(pending_requests)}件")
+        self.logger.info(f"復元ステータス確認対象: {len(pending_files)}件")
         
         try:
             # S3クライアント初期化
@@ -488,14 +607,10 @@ class RestoreProcessor:
             still_pending_count = 0
             failed_count = 0
             
-            for request in pending_requests:
-                bucket = request.get('bucket')
-                key = request.get('key')
-                original_path = request.get('original_file_path')
-                
-                if not bucket or not key:
-                    self.logger.error(f"S3パス情報不完全: {original_path}")
-                    continue
+            for file_info in pending_files:
+                bucket = file_info['bucket']
+                key = file_info['key']
+                original_path = file_info['original_file_path']
                 
                 try:
                     # S3オブジェクトのメタデータを取得してrestoreステータスを確認
@@ -508,25 +623,23 @@ class RestoreProcessor:
                     
                     if restore_header is None:
                         # Restoreヘッダーがない = まだ復元リクエストが処理されていない
-                        request['restore_status'] = 'pending'
-                        request['restore_check_time'] = datetime.datetime.now().isoformat()
+                        file_info['restore_status'] = 'pending'
+                        file_info['restore_check_time'] = datetime.datetime.now().isoformat()
                         still_pending_count += 1
-                        self.logger.info(f"復元処理中: {original_path}")
                         
                     elif 'ongoing-request="true"' in restore_header:
                         # 復元処理が進行中
-                        request['restore_status'] = 'in_progress'
-                        request['restore_check_time'] = datetime.datetime.now().isoformat()
+                        file_info['restore_status'] = 'in_progress'
+                        file_info['restore_check_time'] = datetime.datetime.now().isoformat()
                         still_pending_count += 1
-                        self.logger.info(f"復元進行中: {original_path}")
                         
                     elif 'ongoing-request="false"' in restore_header:
                         # 復元完了
-                        request['restore_status'] = 'completed'
-                        request['restore_completed_time'] = datetime.datetime.now().isoformat()
-                        request['restore_check_time'] = datetime.datetime.now().isoformat()
+                        file_info['restore_status'] = 'completed'
+                        file_info['restore_completed_time'] = datetime.datetime.now().isoformat()
+                        file_info['restore_check_time'] = datetime.datetime.now().isoformat()
                         completed_count += 1
-                        self.logger.info(f"✓ 復元完了: {original_path}")
+                        self.logger.debug(f"✓ 復元完了: {original_path}")
                         
                         # 復元有効期限の抽出（可能であれば）
                         try:
@@ -534,16 +647,15 @@ class RestoreProcessor:
                             if 'expiry-date=' in restore_header:
                                 expiry_part = restore_header.split('expiry-date=')[1]
                                 expiry_date = expiry_part.split('"')[1]
-                                request['restore_expiry'] = expiry_date
-                                self.logger.debug(f"復元有効期限: {expiry_date}")
+                                file_info['restore_expiry'] = expiry_date
                         except Exception:
                             pass  # 有効期限の抽出に失敗しても処理継続
                             
                     else:
                         # 不明なステータス
-                        request['restore_status'] = 'unknown'
-                        request['restore_check_time'] = datetime.datetime.now().isoformat()
-                        request['error'] = f"不明な復元ステータス: {restore_header}"
+                        file_info['restore_status'] = 'unknown'
+                        file_info['restore_check_time'] = datetime.datetime.now().isoformat()
+                        file_info['error'] = f"不明な復元ステータス: {restore_header}"
                         still_pending_count += 1
                         self.logger.warning(f"不明な復元ステータス: {original_path} - {restore_header}")
                     
@@ -552,16 +664,16 @@ class RestoreProcessor:
                     
                     # 特定のエラーハンドリング
                     if 'NoSuchKey' in error_msg:
-                        request['restore_status'] = 'failed'
-                        request['error'] = 'S3にファイルが見つかりません'
+                        file_info['restore_status'] = 'failed'
+                        file_info['error'] = 'S3にファイルが見つかりません'
                     elif 'InvalidObjectState' in error_msg:
-                        request['restore_status'] = 'failed'
-                        request['error'] = 'オブジェクトがGlacierストレージクラスではありません'
+                        file_info['restore_status'] = 'failed'
+                        file_info['error'] = 'オブジェクトがGlacierストレージクラスではありません'
                     else:
-                        request['restore_status'] = 'check_failed'
-                        request['error'] = f'復元ステータス確認エラー: {error_msg}'
+                        file_info['restore_status'] = 'check_failed'
+                        file_info['error'] = f'復元ステータス確認エラー: {error_msg}'
                     
-                    request['restore_check_time'] = datetime.datetime.now().isoformat()
+                    file_info['restore_check_time'] = datetime.datetime.now().isoformat()
                     failed_count += 1
                     self.logger.error(f"✗ 復元ステータス確認失敗: {original_path} - {error_msg}")
             
@@ -573,38 +685,37 @@ class RestoreProcessor:
             self.logger.info(f"  - 処理中: {still_pending_count}件")
             self.logger.info(f"  - 確認失敗: {failed_count}件")
             
-            # 完了ファイルがある場合の案内
-            if completed_count > 0:
-                self.logger.info(f"復元完了ファイルがあります。ダウンロード処理を実行してください:")
-                self.logger.info(f"python restore_script_main.py [csv_path] {self.request_id} --download-only")
-            
-            if still_pending_count > 0:
-                self.logger.info(f"まだ処理中のファイルがあります。しばらく待ってから再度確認してください")
-            
             return restore_requests
             
         except Exception as e:
             self.logger.error(f"復元完了確認処理でエラーが発生: {str(e)}")
             # 全リクエストにエラーマーク
-            for request in pending_requests:
-                request['restore_status'] = 'check_failed'
-                request['error'] = f'S3接続エラー: {str(e)}'
-                request['restore_check_time'] = datetime.datetime.now().isoformat()
+            for request in restore_requests:
+                for file_info in request.get('files_found', []):
+                    if file_info.get('restore_status') in ['requested', 'already_in_progress']:
+                        file_info['restore_status'] = 'check_failed'
+                        file_info['error'] = f'S3接続エラー: {str(e)}'
+                        file_info['restore_check_time'] = datetime.datetime.now().isoformat()
             return restore_requests
         
     def download_and_place_files(self, restore_requests: List[Dict]) -> List[Dict]:
-        """ファイルダウンロード・配置処理"""
+        """ファイルダウンロード・配置処理（階層構造保持対応）"""
         self.logger.info("ファイルダウンロード・配置開始")
         
-        # 復元完了ファイルのみを対象とする
-        completed_requests = [req for req in restore_requests 
-                             if req.get('restore_status') == 'completed']
+        # 復元完了ファイルを収集
+        completed_files = []
+        for request in restore_requests:
+            for file_info in request.get('files_found', []):
+                if file_info.get('restore_status') == 'completed':
+                    file_info['restore_directory'] = request['restore_directory']
+                    file_info['restore_mode'] = request['restore_mode']
+                    completed_files.append(file_info)
         
-        if not completed_requests:
+        if not completed_files:
             self.logger.info("ダウンロード対象ファイルがありません")
             return restore_requests
         
-        self.logger.info(f"ダウンロード対象ファイル数: {len(completed_requests)}件")
+        self.logger.info(f"ダウンロード対象ファイル数: {len(completed_files)}件")
         
         try:
             # S3クライアント初期化
@@ -627,37 +738,48 @@ class RestoreProcessor:
             failed_downloads = 0
             skipped_files = 0
             
-            for i, request in enumerate(completed_requests, 1):
-                bucket = request.get('bucket')
-                key = request.get('key')
-                original_path = request.get('original_file_path')
-                restore_dir = request.get('restore_directory')
-                
-                if not all([bucket, key, original_path, restore_dir]):
-                    self.logger.error(f"必要な情報が不足: {original_path}")
-                    request['download_status'] = 'failed'
-                    request['download_error'] = '必要な情報が不足しています'
-                    failed_downloads += 1
-                    continue
+            for i, file_info in enumerate(completed_files, 1):
+                bucket = file_info['bucket']
+                key = file_info['key']
+                original_path = file_info['original_file_path']
+                restore_dir = file_info['restore_directory']
+                relative_path = file_info['relative_path']
+                restore_mode = file_info['restore_mode']
                 
                 # 進捗ログ
-                self.logger.info(f"[{i}/{len(completed_requests)}] ダウンロード処理中: {original_path}")
+                self.logger.info(f"[{i}/{len(completed_files)}] ダウンロード処理中: {original_path}")
                 
-                # 復元先ファイルパスの生成
-                original_filename = os.path.basename(original_path)
-                destination_path = os.path.join(restore_dir, original_filename)
+                # 復元先ファイルパスの生成（階層構造保持）
+                if restore_mode == 'directory':
+                    # ディレクトリ復元: 相対パスを使用して階層構造を保持
+                    destination_path = os.path.join(restore_dir, relative_path)
+                else:
+                    # ファイル復元: ファイル名のみ
+                    filename = os.path.basename(original_path)
+                    destination_path = os.path.join(restore_dir, filename)
+                
+                # 配置先ディレクトリの作成（階層構造用）
+                destination_dir = os.path.dirname(destination_path)
+                try:
+                    os.makedirs(destination_dir, exist_ok=True)
+                except Exception as e:
+                    self.logger.error(f"✗ 配置先ディレクトリ作成失敗: {destination_dir} - {e}")
+                    file_info['download_status'] = 'failed'
+                    file_info['download_error'] = f'ディレクトリ作成失敗: {str(e)}'
+                    failed_downloads += 1
+                    continue
                 
                 # 同名ファイルの存在チェック
                 if skip_existing and os.path.exists(destination_path):
                     self.logger.info(f"同名ファイルが存在するためスキップ: {destination_path}")
-                    request['download_status'] = 'skipped'
-                    request['download_error'] = '同名ファイルが既に存在します'
-                    request['destination_path'] = destination_path
+                    file_info['download_status'] = 'skipped'
+                    file_info['download_error'] = '同名ファイルが既に存在します'
+                    file_info['destination_path'] = destination_path
                     skipped_files += 1
                     continue
                 
                 # 一時ファイルパスの生成
-                temp_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_filename}"
+                temp_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.path.basename(original_path)}"
                 temp_file_path = temp_path / temp_filename
                 
                 # S3からダウンロード（リトライ付き）
@@ -667,16 +789,15 @@ class RestoreProcessor:
                 
                 if not download_result['success']:
                     self.logger.error(f"✗ ダウンロード失敗: {original_path} - {download_result['error']}")
-                    request['download_status'] = 'failed'
-                    request['download_error'] = download_result['error']
+                    file_info['download_status'] = 'failed'
+                    file_info['download_error'] = download_result['error']
                     failed_downloads += 1
                     continue
                 
                 # ファイルサイズ確認
                 try:
                     downloaded_size = os.path.getsize(temp_file_path)
-                    self.logger.debug(f"ダウンロードサイズ: {downloaded_size:,} bytes")
-                    request['downloaded_size'] = downloaded_size
+                    file_info['downloaded_size'] = downloaded_size
                 except Exception as e:
                     self.logger.warning(f"ダウンロードサイズ確認エラー: {e}")
                 
@@ -687,39 +808,25 @@ class RestoreProcessor:
                 
                 if placement_result['success']:
                     # 成功
-                    request['download_status'] = 'completed'
-                    request['destination_path'] = destination_path
-                    request['download_completed_time'] = datetime.datetime.now().isoformat()
+                    file_info['download_status'] = 'completed'
+                    file_info['destination_path'] = destination_path
+                    file_info['download_completed_time'] = datetime.datetime.now().isoformat()
                     successful_downloads += 1
                     self.logger.info(f"✓ ダウンロード完了: {original_path} -> {destination_path}")
-                    
-                    # 一時ファイルのクリーンアップ（move後は自動削除されるが念のため確認）
-                    try:
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                            self.logger.debug(f"一時ファイル削除成功: {temp_file_path}")
-                        else:
-                            self.logger.debug(f"一時ファイルは既に削除済み: {temp_file_path}")
-                    except Exception as e:
-                        self.logger.debug(f"一時ファイル削除処理: {e}")
                     
                 else:
                     # 配置失敗
                     self.logger.error(f"✗ ファイル配置失敗: {original_path} - {placement_result['error']}")
-                    request['download_status'] = 'failed'
-                    request['download_error'] = f"ファイル配置失敗: {placement_result['error']}"
+                    file_info['download_status'] = 'failed'
+                    file_info['download_error'] = f"ファイル配置失敗: {placement_result['error']}"
                     failed_downloads += 1
                     
-                    # 一時ファイルのクリーンアップ
-                    try:
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                            self.logger.debug(f"一時ファイル削除成功: {temp_file_path}")
-                    except Exception as e:
-                        self.logger.warning(f"一時ファイル削除エラー: {e}")
-            
-            # 統計更新
-            self.stats['restore_completed'] = successful_downloads
+                # 一時ファイルのクリーンアップ
+                try:
+                    if os.path.exists(temp_file_path):
+                        os.remove(temp_file_path)
+                except Exception as e:
+                    self.logger.debug(f"一時ファイル削除エラー: {e}")
             
             self.logger.info("ファイルダウンロード・配置完了")
             self.logger.info(f"  - 成功: {successful_downloads}件")
@@ -730,11 +837,6 @@ class RestoreProcessor:
             
         except Exception as e:
             self.logger.error(f"ダウンロード・配置処理でエラーが発生: {str(e)}")
-            # 全ての完了リクエストを失敗としてマーク
-            for request in completed_requests:
-                if 'download_status' not in request:
-                    request['download_status'] = 'failed'
-                    request['download_error'] = f'処理エラー: {str(e)}'
             return restore_requests
 
     def _download_file_with_retry(self, s3_client, bucket: str, key: str, 
@@ -751,19 +853,12 @@ class RestoreProcessor:
                 # ダウンロード成功確認（0バイトファイルも成功として扱う）
                 if os.path.exists(local_path):
                     file_size = os.path.getsize(local_path)
-                    self.logger.debug(f"ダウンロード完了: ファイルサイズ {file_size} bytes")
                     return {'success': True, 'error': None, 'file_size': file_size}
                 else:
                     raise Exception("ダウンロード後にファイルが作成されませんでした")
                     
             except Exception as e:
                 error_msg = str(e)
-                
-                # S3側のエラー詳細をログ出力
-                if hasattr(e, 'response'):
-                    error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-                    error_message = e.response.get('Error', {}).get('Message', 'Unknown')
-                    self.logger.error(f"S3エラー: {error_code} - {error_message}")
                 
                 # 特定のエラーはリトライしない
                 if any(err in error_msg for err in ['NoSuchKey', 'AccessDenied', 'InvalidObjectState']):
@@ -784,7 +879,6 @@ class RestoreProcessor:
                     pass
                 
                 # 少し待機してからリトライ
-                import time
                 time.sleep(2 ** attempt)  # 指数バックオフ
         
         return {'success': False, 'error': '不明なエラー'}
@@ -818,14 +912,6 @@ class RestoreProcessor:
             return {'success': False, 'error': f'OS エラー: {str(e)}'}
         except Exception as e:
             return {'success': False, 'error': f'予期しないエラー: {str(e)}'}
-        
-    def wait_for_restore_completion(self, restore_requests: List[Dict]) -> List[Dict]:
-        """復元完了待機処理"""
-        self.logger.info("復元完了待機開始")
-        
-        # TODO: 実装
-        self.logger.info("復元完了待機完了")
-        return restore_requests
         
     def generate_restore_error_csv(self, original_csv_path: str) -> Optional[str]:
         """復元エラーCSV生成"""
@@ -865,6 +951,118 @@ class RestoreProcessor:
         except Exception as e:
             self.logger.error(f"復元エラーCSV生成失敗: {str(e)}")
             return None
+
+    def generate_failed_files_retry_csv(self, restore_requests: List[Dict], original_csv_path: str) -> Optional[str]:
+        """失敗ファイル用のリトライCSV生成"""
+        failed_files = []
+        
+        # 失敗したファイルを収集
+        for request in restore_requests:
+            for file_info in request.get('files_found', []):
+                if (file_info.get('restore_status') == 'failed' or 
+                    file_info.get('download_status') == 'failed'):
+                    failed_files.append({
+                        'original_path': file_info['original_file_path'],
+                        'restore_directory': request['restore_directory'],
+                        'error_stage': self._determine_error_stage(file_info),
+                        'error_reason': file_info.get('error', file_info.get('download_error', '不明なエラー'))
+                    })
+        
+        if not failed_files:
+            return None
+            
+        self.logger.info("失敗ファイル用リトライCSV生成開始")
+        
+        try:
+            # logsディレクトリにリトライCSVを出力
+            log_config = self.config.get('logging', {})
+            log_dir = Path(log_config.get('log_directory', 'logs'))
+            log_dir.mkdir(exist_ok=True)
+            
+            # ファイル名生成
+            original_path = Path(original_csv_path)
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            retry_csv_path = log_dir / f"{original_path.stem}_failed_retry_{timestamp}.csv"
+            
+            # リトライCSVの生成
+            with open(retry_csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = ['復元対象パス', '復元先ディレクトリ', '復元モード', 'エラー段階', 'エラー理由']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                writer.writeheader()
+                for item in failed_files:
+                    writer.writerow({
+                        '復元対象パス': item['original_path'],
+                        '復元先ディレクトリ': item['restore_directory'],
+                        '復元モード': 'file',  # 失敗分は個別ファイルとして再試行
+                        'エラー段階': item['error_stage'],
+                        'エラー理由': item['error_reason']
+                    })
+            
+            self.logger.info(f"失敗ファイル用リトライCSV生成完了: {retry_csv_path}")
+            self.logger.info(f"リトライ対象ファイル数: {len(failed_files)}")
+            
+            return str(retry_csv_path)
+            
+        except Exception as e:
+            self.logger.error(f"失敗ファイル用リトライCSV生成失敗: {str(e)}")
+            return None
+
+    def _determine_error_stage(self, file_info: Dict) -> str:
+        """エラー段階の判定"""
+        if file_info.get('restore_status') == 'failed':
+            return 'restore_request'
+        elif file_info.get('download_status') == 'failed':
+            return 'download'
+        else:
+            return 'unknown'
+        
+    def _save_restore_status(self, restore_requests: List[Dict]) -> None:
+        """復元ステータスをファイルに保存"""
+        try:
+            log_config = self.config.get('logging', {})
+            log_dir = Path(log_config.get('log_directory', 'logs'))
+            log_dir.mkdir(exist_ok=True)
+            
+            status_file = log_dir / f"restore_status_{self.request_id}.json"
+            
+            status_data = {
+                "request_id": self.request_id,
+                "request_date": datetime.datetime.now().isoformat(),
+                "total_requests": len(restore_requests),
+                "restore_requests": restore_requests
+            }
+            
+            with open(status_file, 'w', encoding='utf-8') as f:
+                json.dump(status_data, f, ensure_ascii=False, indent=2, default=str)
+            
+            self.logger.info(f"復元ステータス保存: {status_file}")
+            
+        except Exception as e:
+            self.logger.error(f"復元ステータス保存エラー: {str(e)}")
+    
+    def _load_restore_status(self) -> List[Dict]:
+        """復元ステータスをファイルから読み込み"""
+        try:
+            log_config = self.config.get('logging', {})
+            log_dir = Path(log_config.get('log_directory', 'logs'))
+            status_file = log_dir / f"restore_status_{self.request_id}.json"
+            
+            if not status_file.exists():
+                self.logger.error(f"復元ステータスファイルが存在しません: {status_file}")
+                return []
+            
+            with open(status_file, 'r', encoding='utf-8') as f:
+                status_data = json.load(f)
+            
+            restore_requests = status_data.get('restore_requests', [])
+            self.logger.info(f"復元ステータス読み込み完了: {len(restore_requests)}件")
+            
+            return restore_requests
+            
+        except Exception as e:
+            self.logger.error(f"復元ステータス読み込みエラー: {str(e)}")
+            return []
         
     def print_statistics(self) -> None:
         """処理統計の表示"""
@@ -873,11 +1071,14 @@ class RestoreProcessor:
         self.logger.info("=== 復元処理統計 ===")
         self.logger.info(f"処理時間: {elapsed_time}")
         self.logger.info(f"CSV検証エラー数: {len(self.csv_errors)}")
-        self.logger.info(f"総復元依頼数: {self.stats['total_files']}")
+        self.logger.info(f"総復元依頼数: {self.stats['total_requests']}")
+        self.logger.info(f"  - ディレクトリ復元: {self.stats['directory_requests']}件")
+        self.logger.info(f"  - ファイル復元: {self.stats['file_requests']}件")
+        self.logger.info(f"検出ファイル数: {self.stats['total_files_found']}")
         self.logger.info(f"復元リクエスト送信数: {self.stats['restore_requested']}")
         self.logger.info(f"復元完了数: {self.stats['restore_completed']}")
         self.logger.info(f"失敗数: {self.stats['failed_files']}")
-        
+
     def run(self, csv_path: str, request_id: str, mode: str = 'request') -> int:
         """
         メイン処理の実行
@@ -926,35 +1127,32 @@ class RestoreProcessor:
         if not restore_requests:
             self.logger.error("有効な復元依頼が見つかりません")
             return 1
-            
-        self.stats['total_files'] = len(restore_requests)
         
-        # 2. データベースからS3パス検索
-        restore_requests = self.lookup_s3_paths_from_database(restore_requests)
+        # 2. データベースからファイル検索
+        restore_requests = self.lookup_files_from_database(restore_requests)
         
-        # S3パスが見つからないファイルをフィルタリング
-        valid_restore_requests = [req for req in restore_requests if req.get('s3_path')]
-        failed_requests = [req for req in restore_requests if not req.get('s3_path')]
+        # ファイルが見つからない依頼をフィルタリング
+        valid_restore_requests = [req for req in restore_requests if req.get('total_files_found', 0) > 0]
+        failed_requests = [req for req in restore_requests if req.get('total_files_found', 0) == 0]
         
         if failed_requests:
-            self.logger.warning(f"S3パスが見つからないファイル: {len(failed_requests)}件")
+            self.logger.warning(f"ファイルが見つからない依頼: {len(failed_requests)}件")
             for req in failed_requests:
-                self.logger.warning(f"  - {req['original_file_path']}: {req.get('error', '不明')}")
+                self.logger.warning(f"  - {req['restore_path']}: {req.get('error', '不明')}")
         
         if not valid_restore_requests:
             self.logger.error("復元可能なファイルが見つかりません")
             return 1
         
         # 3. S3復元リクエスト送信
-        restore_requests = self.request_restore(valid_restore_requests)
+        restore_requests = self.request_restore(valid_restore_requests + failed_requests)
         
-        # 4. ステータスファイル保存（失敗分も含む）
-        all_requests = valid_restore_requests + failed_requests
-        self._save_restore_status(all_requests)
+        # 4. ステータスファイル保存
+        self._save_restore_status(restore_requests)
         
         self.logger.info(f"復元リクエスト送信完了 - {self.stats['restore_requested']}件")
         if failed_requests:
-            self.logger.warning(f"復元不可ファイル - {len(failed_requests)}件")
+            self.logger.warning(f"復元不可依頼 - {len(failed_requests)}件")
         self.logger.info("48時間後にダウンロード処理を実行してください:")
         self.logger.info(f"python restore_script_main.py {csv_path} {self.request_id} --download-only")
         
@@ -971,26 +1169,35 @@ class RestoreProcessor:
             self.logger.error("先に復元リクエスト送信を実行してください")
             return 1
         
-        self.stats['total_files'] = len(restore_requests)
+        # 統計更新
+        total_files = sum(req.get('total_files_found', 0) for req in restore_requests)
+        self.stats['total_files_found'] = total_files
         
         # 2. 復元完了確認（最新ステータス取得）
         self.logger.info("復元ステータスを確認しています...")
         restore_requests = self.check_restore_completion(restore_requests)
         
-        # 3. 復元完了ファイルのフィルタリング
-        completed_requests = [req for req in restore_requests 
-                             if req.get('restore_status') == 'completed']
+        # 3. 復元完了ファイルの確認
+        completed_files = []
+        for request in restore_requests:
+            for file_info in request.get('files_found', []):
+                if file_info.get('restore_status') == 'completed':
+                    completed_files.append(file_info)
         
-        if not completed_requests:
+        if not completed_files:
             self.logger.info("復元完了ファイルがありません")
-            pending_count = len([req for req in restore_requests 
-                               if req.get('restore_status') in ['pending', 'in_progress']])
-            if pending_count > 0:
-                self.logger.info(f"復元処理中のファイル: {pending_count}件")
+            pending_files = []
+            for request in restore_requests:
+                for file_info in request.get('files_found', []):
+                    if file_info.get('restore_status') in ['pending', 'in_progress']:
+                        pending_files.append(file_info)
+            
+            if pending_files:
+                self.logger.info(f"復元処理中のファイル: {len(pending_files)}件")
                 self.logger.info("しばらく待ってから再度実行してください")
             return 0
         
-        self.logger.info(f"復元完了ファイル: {len(completed_requests)}件をダウンロードします")
+        self.logger.info(f"復元完了ファイル: {len(completed_files)}件をダウンロードします")
         
         # 4. ファイルダウンロード・配置
         restore_requests = self.download_and_place_files(restore_requests)
@@ -998,75 +1205,42 @@ class RestoreProcessor:
         # 5. ステータスファイル更新
         self._save_restore_status(restore_requests)
         
-        downloaded_count = len([req for req in restore_requests 
-                              if req.get('download_status') == 'completed'])
-        skipped_count = len([req for req in restore_requests 
-                           if req.get('download_status') == 'skipped'])
+        # 6. 失敗ファイル用リトライCSV生成
+        retry_csv_path = self.generate_failed_files_retry_csv(restore_requests, csv_path)
+        if retry_csv_path:
+            self.logger.warning(f"失敗ファイルがあります。リトライCSV: {retry_csv_path}")
+        
+        # 結果サマリー
+        downloaded_count = 0
+        skipped_count = 0
+        for request in restore_requests:
+            for file_info in request.get('files_found', []):
+                if file_info.get('download_status') == 'completed':
+                    downloaded_count += 1
+                elif file_info.get('download_status') == 'skipped':
+                    skipped_count += 1
         
         self.logger.info(f"ダウンロード処理完了")
         self.logger.info(f"  - ダウンロード成功: {downloaded_count}件")
         self.logger.info(f"  - スキップ: {skipped_count}件")
         
         # 未完了ファイルがある場合の案内
-        remaining_count = len([req for req in restore_requests 
-                             if req.get('restore_status') in ['pending', 'in_progress']])
+        remaining_count = 0
+        for request in restore_requests:
+            for file_info in request.get('files_found', []):
+                if file_info.get('restore_status') in ['pending', 'in_progress']:
+                    remaining_count += 1
+        
         if remaining_count > 0:
             self.logger.info(f"復元処理中のファイル: {remaining_count}件")
             self.logger.info("復元完了後に再度ダウンロード処理を実行してください")
         
         return 0
-    
-    def _save_restore_status(self, restore_requests: List[Dict]) -> None:
-        """復元ステータスをファイルに保存"""
-        try:
-            log_config = self.config.get('logging', {})
-            log_dir = Path(log_config.get('log_directory', 'logs'))
-            log_dir.mkdir(exist_ok=True)
-            
-            status_file = log_dir / f"restore_status_{self.request_id}.json"
-            
-            status_data = {
-                "request_id": self.request_id,
-                "request_date": datetime.datetime.now().isoformat(),
-                "total_requests": len(restore_requests),
-                "restore_requests": restore_requests
-            }
-            
-            with open(status_file, 'w', encoding='utf-8') as f:
-                json.dump(status_data, f, ensure_ascii=False, indent=2, default=str)
-            
-            self.logger.info(f"復元ステータス保存: {status_file}")
-            
-        except Exception as e:
-            self.logger.error(f"復元ステータス保存エラー: {str(e)}")
-    
-    def _load_restore_status(self) -> List[Dict]:
-        """復元ステータスをファイルから読み込み"""
-        try:
-            log_config = self.config.get('logging', {})
-            log_dir = Path(log_config.get('log_directory', 'logs'))
-            status_file = log_dir / f"restore_status_{self.request_id}.json"
-            
-            if not status_file.exists():
-                self.logger.error(f"復元ステータスファイルが存在しません: {status_file}")
-                return []
-            
-            with open(status_file, 'r', encoding='utf-8') as f:
-                status_data = json.load(f)
-            
-            restore_requests = status_data.get('restore_requests', [])
-            self.logger.info(f"復元ステータス読み込み完了: {len(restore_requests)}件")
-            
-            return restore_requests
-            
-        except Exception as e:
-            self.logger.error(f"復元ステータス読み込みエラー: {str(e)}")
-            return []
 
 
 def main():
     """メイン関数"""
-    parser = argparse.ArgumentParser(description='ファイル復元処理')
+    parser = argparse.ArgumentParser(description='ファイル復元処理（ディレクトリ・ファイル混合対応）')
     parser.add_argument('csv_path', help='復元依頼を記載したCSVファイルのパス')
     parser.add_argument('request_id', help='復元依頼ID')
     parser.add_argument('--config', default=DEFAULT_CONFIG_PATH, 
