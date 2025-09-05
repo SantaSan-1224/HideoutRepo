@@ -1,0 +1,3 @@
+復元対象パス, 復元先ディレクトリ, 復元モード
+\\server\share\project\, C:\restored\, directory
+\\server\share\project\file1.txt, C:\restored\, file
