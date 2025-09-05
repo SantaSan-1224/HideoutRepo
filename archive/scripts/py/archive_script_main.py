@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-確実に動作するアーカイブスクリプト（最終版）
+確実に動作するアーカイブスクリプト（仕様変更版）
+- 空ファイル作成を廃止
+- ディレクトリリネーム機能追加
 """
 
-import os
-import sys
+import argparse
+import csv
+import datetime
 import json
 import logging
-import argparse
-import datetime
+import os
+import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import csv
 
 # 設定ファイルのデフォルトパス
 DEFAULT_CONFIG_PATH = "config/archive_config.json"
@@ -43,7 +46,7 @@ class ArchiveProcessor:
             },
             "file_server": {
                 "exclude_extensions": [".tmp", ".lock", ".bak"],
-                "archived_suffix": "_archived.txt"
+                "archived_suffix": "_archived"  # ディレクトリ用サフィックス
             },
             "processing": {
                 "max_file_size": 10737418240,
@@ -394,7 +397,7 @@ class ArchiveProcessor:
         try:
             import boto3
             from botocore.config import Config
-            
+
             # AWS設定の取得（スペース除去）
             aws_config = self.config.get('aws', {})
             region = aws_config.get('region', 'ap-northeast-1').strip()
@@ -534,8 +537,8 @@ class ArchiveProcessor:
         return {'success': False, 'error': '不明なエラー'}
         
     def create_archived_files(self, results: List[Dict]) -> List[Dict]:
-        """アーカイブ後処理（空ファイル作成→元ファイル削除）"""
-        self.logger.info("アーカイブ後処理開始")
+        """アーカイブ後処理（元ファイル削除のみ）"""
+        self.logger.info("アーカイブ後処理開始（元ファイル削除）")
         
         # 成功したファイルのみ処理
         successful_results = [r for r in results if r.get('success', False)]
@@ -546,7 +549,6 @@ class ArchiveProcessor:
         
         self.logger.info(f"アーカイブ後処理対象: {len(successful_results)}件")
         
-        archived_suffix = self.config.get('file_server', {}).get('archived_suffix', '_archived')
         processed_results = []
         
         for result in results:
@@ -558,20 +560,7 @@ class ArchiveProcessor:
             file_path = result['file_path']
             
             try:
-                # 1. 空ファイル作成
-                archived_file_path = f"{file_path}{archived_suffix}"
-                
-                self.logger.info(f"空ファイル作成: {archived_file_path}")
-                
-                # 完全に空のファイル（0バイト）を作成
-                with open(archived_file_path, 'w') as f:
-                    pass  # 何も書かない（空ファイル）
-                
-                # 空ファイル作成確認
-                if not os.path.exists(archived_file_path):
-                    raise Exception("空ファイルの作成に失敗しました")
-                
-                # 2. 空ファイル作成成功後に元ファイル削除
+                # 元ファイル削除
                 self.logger.info(f"元ファイル削除: {file_path}")
                 
                 os.remove(file_path)
@@ -581,7 +570,7 @@ class ArchiveProcessor:
                     raise Exception("元ファイルの削除に失敗しました")
                 
                 # 成功
-                result['archived_file_path'] = archived_file_path
+                result['file_deleted'] = True
                 result['archive_completed'] = True
                 self.logger.info(f"✓ アーカイブ後処理完了: {file_path}")
                 
@@ -590,18 +579,10 @@ class ArchiveProcessor:
                 error_msg = f"アーカイブ後処理失敗: {str(e)}"
                 self.logger.error(f"✗ {error_msg}: {file_path}")
                 
-                # 失敗時のクリーンアップ
-                try:
-                    # 作成済みの空ファイルがあれば削除
-                    if 'archived_file_path' in locals() and os.path.exists(archived_file_path):
-                        os.remove(archived_file_path)
-                        self.logger.info(f"作成済み空ファイルを削除: {archived_file_path}")
-                except Exception as cleanup_error:
-                    self.logger.warning(f"空ファイルクリーンアップ失敗: {cleanup_error}")
-                
                 # 結果を失敗に変更
                 result['success'] = False
                 result['error'] = error_msg
+                result['file_deleted'] = False
                 result['archive_completed'] = False
             
             processed_results.append(result)
@@ -615,6 +596,59 @@ class ArchiveProcessor:
         self.logger.info(f"  - 失敗: {failed_count}件")
         
         return processed_results
+
+    def rename_archived_directories(self, results: List[Dict]) -> None:
+        """各ディレクトリ処理完了後の個別リネーム"""
+        self.logger.info("ディレクトリリネーム処理開始")
+        
+        # ディレクトリごとの処理完了状況を確認
+        directory_stats = self._calculate_directory_completion(results)
+        
+        for directory_path, stats in directory_stats.items():
+            if stats['processed'] == stats['total']:  # 全ファイル処理完了
+                self._rename_directory_simple(directory_path)
+        
+        self.logger.info("ディレクトリリネーム処理完了")
+
+    def _rename_directory_simple(self, directory_path: str) -> None:
+        """シンプルなディレクトリリネーム（リトライなし）"""
+        archived_suffix = self.config.get('file_server', {}).get('archived_suffix', '_archived')
+        archived_path = f"{directory_path}{archived_suffix}"
+        
+        try:
+            os.rename(directory_path, archived_path)
+            self.logger.info(f"✓ ディレクトリリネーム成功: {directory_path} → {archived_path}")
+            
+        except PermissionError as e:
+            self.logger.error(f"✗ ディレクトリリネーム失敗（権限エラー）: {directory_path}")
+            self.logger.error(f"  エラー詳細: {str(e)}")
+            self.logger.error(f"  手動対応: 管理者権限で '{directory_path}' を '{archived_path}' にリネームしてください")
+            
+        except OSError as e:
+            self.logger.error(f"✗ ディレクトリリネーム失敗（システムエラー）: {directory_path}")
+            self.logger.error(f"  エラー詳細: {str(e)}")
+            self.logger.error(f"  手動対応: '{directory_path}' を '{archived_path}' にリネームしてください")
+            
+        except Exception as e:
+            self.logger.error(f"✗ ディレクトリリネーム失敗（予期しないエラー）: {directory_path}")
+            self.logger.error(f"  エラー詳細: {str(e)}")
+            self.logger.error(f"  手動対応: システム管理者にご連絡ください")
+
+    def _calculate_directory_completion(self, results: List[Dict]) -> Dict:
+        """ディレクトリごとの処理完了状況を計算"""
+        directory_stats = {}
+        
+        for result in results:
+            directory = result.get('directory')
+            if directory:
+                if directory not in directory_stats:
+                    directory_stats[directory] = {'total': 0, 'processed': 0}
+                
+                directory_stats[directory]['total'] += 1
+                # 成功・失敗問わず処理済みとしてカウント
+                directory_stats[directory]['processed'] += 1
+        
+        return directory_stats
         
     def save_to_database(self, results: List[Dict]) -> None:
         """データベース登録処理"""
@@ -704,7 +738,7 @@ class ArchiveProcessor:
         try:
             import psycopg2
             from psycopg2.extras import RealDictCursor
-            
+
             # データベース設定取得
             db_config = self.config.get('database', {})
             
@@ -900,13 +934,16 @@ class ArchiveProcessor:
             # 3. S3アップロード
             upload_results = self.archive_to_s3(files)
             
-            # 4. アーカイブ後処理
+            # 4. アーカイブ後処理（元ファイル削除のみ）
             processed_results = self.create_archived_files(upload_results)
             
             # 5. データベース登録
             self.save_to_database(processed_results)
             
-            # 6. アーカイブ処理エラー処理
+            # 6. ディレクトリリネーム処理（新機能）
+            self.rename_archived_directories(processed_results)
+            
+            # 7. アーカイブ処理エラー処理
             failed_items = [r for r in processed_results if not r.get('success', False)]
             if failed_items:
                 archive_error_csv = self.generate_error_csv(failed_items, csv_path)
