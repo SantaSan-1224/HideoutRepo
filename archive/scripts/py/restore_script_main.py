@@ -533,10 +533,39 @@ class RestoreProcessor:
                 
                 if orig_normalized.startswith(restore_normalized):
                     relative = orig_normalized[len(restore_normalized):]
-                    return relative if relative else os.path.basename(original_path)
+                    
+                    # 相対パスが空でない場合はそのまま返す
+                    if relative:
+                        return relative
+                    else:
+                        # 相対パスが空の場合（直下のファイル）はファイル名のみ
+                        return os.path.basename(original_path)
                 else:
-                    # パスが一致しない場合はファイル名のみ
-                    return os.path.basename(original_path)
+                    # パスが一致しない場合
+                    # より柔軟な相対パス計算を試行
+                    self.logger.debug(f"パス不一致のため代替計算: {original_path} vs {restore_path}")
+                    
+                    # 復元対象パスの最後の有効なディレクトリ部分を特定
+                    restore_parts = [p for p in restore_normalized.split('\\') if p]
+                    orig_parts = [p for p in orig_normalized.split('\\') if p]
+                    
+                    # 共通部分を見つけて相対パスを計算
+                    common_length = 0
+                    for i, (rp, op) in enumerate(zip(restore_parts, orig_parts)):
+                        if rp.lower() == op.lower():  # 大文字小文字を無視して比較
+                            common_length = i + 1
+                        else:
+                            break
+                    
+                    # 復元対象ディレクトリより後の部分を相対パスとする
+                    if common_length > 0 and len(orig_parts) > common_length:
+                        relative_parts = orig_parts[common_length:]
+                        relative_path = '\\'.join(relative_parts)
+                        self.logger.debug(f"代替計算による相対パス: {relative_path}")
+                        return relative_path
+                    else:
+                        # 最終手段：ファイル名のみ
+                        return os.path.basename(original_path)
                     
         except Exception as e:
             self.logger.warning(f"相対パス計算エラー: {e}")
