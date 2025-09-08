@@ -1,0 +1,32 @@
+2025-09-08 10:05:06,068 - restore_processor - INFO - ログファイル: logs\restore_20250908_100506.log
+2025-09-08 10:05:06,069 - restore_processor - INFO - 復元処理開始 - Request ID: 000002, Mode: request
+2025-09-08 10:05:06,071 - restore_processor - INFO - === 復元リクエスト送信モード ===
+2025-09-08 10:05:06,072 - restore_processor - INFO - 復元依頼CSV読み込み開始: restore_requests.csv
+2025-09-08 10:05:06,074 - restore_processor - INFO - 読み込み行数: 2
+2025-09-08 10:05:06,074 - restore_processor - INFO - 行 1: ヘッダー行をスキップ
+2025-09-08 10:05:06,077 - restore_processor - INFO - 行 2: 有効な復元依頼追加 (directoryモード) ✓
+2025-09-08 10:05:06,078 - restore_processor - INFO - CSV読み込み完了
+2025-09-08 10:05:06,078 - restore_processor - INFO -   - 有効な復元依頼数: 1
+2025-09-08 10:05:06,079 - restore_processor - INFO -     - ディレクトリ復元: 1件
+2025-09-08 10:05:06,079 - restore_processor - INFO -     - ファイル復元: 0件
+2025-09-08 10:05:06,080 - restore_processor - INFO -   - エラー項目数: 0
+2025-09-08 10:05:06,080 - restore_processor - INFO - データベースからファイル検索開始
+2025-09-08 10:05:06,124 - restore_processor - INFO - データベース接続: localhost:5432/archive_system
+2025-09-08 10:05:06,191 - restore_processor - INFO - データベース接続成功
+2025-09-08 10:05:06,191 - restore_processor - INFO - 検索開始: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\ (directoryモード)
+2025-09-08 10:05:06,198 - restore_processor - ERROR - ファイル見つからず: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\
+2025-09-08 10:05:06,199 - restore_processor - INFO - データベースファイル検索完了
+2025-09-08 10:05:06,199 - restore_processor - INFO -   - 総検出ファイル数: 0件
+2025-09-08 10:05:06,200 - restore_processor - WARNING - ファイルが見つからない依頼: 1件
+2025-09-08 10:05:06,200 - restore_processor - WARNING -   - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\: データベースにアーカイブ履歴が見つかりません
+2025-09-08 10:05:06,201 - restore_processor - ERROR - 復元可能なファイルが見つかりません
+2025-09-08 10:05:06,201 - restore_processor - INFO - === 復元処理統計 ===
+2025-09-08 10:05:06,201 - restore_processor - INFO - 処理時間: 0:00:00.132032
+2025-09-08 10:05:06,207 - restore_processor - INFO - CSV検証エラー数: 0
+2025-09-08 10:05:06,207 - restore_processor - INFO - 総復元依頼数: 1
+2025-09-08 10:05:06,208 - restore_processor - INFO -   - ディレクトリ復元: 1件
+2025-09-08 10:05:06,208 - restore_processor - INFO -   - ファイル復元: 0件
+2025-09-08 10:05:06,209 - restore_processor - INFO - 検出ファイル数: 0
+2025-09-08 10:05:06,209 - restore_processor - INFO - 復元リクエスト送信数: 0
+2025-09-08 10:05:06,210 - restore_processor - INFO - 復元完了数: 0
+2025-09-08 10:05:06,210 - restore_processor - INFO - 失敗数: 0
