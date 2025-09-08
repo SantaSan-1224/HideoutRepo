@@ -1,0 +1,55 @@
+2025-09-08 10:51:20,487 - restore_processor - INFO - ログファイル: logs\restore_20250908_105120.log
+2025-09-08 10:51:20,487 - restore_processor - INFO - 復元処理開始 - Request ID: 000004, Mode: request
+2025-09-08 10:51:20,489 - restore_processor - INFO - === 復元リクエスト送信モード ===
+2025-09-08 10:51:20,490 - restore_processor - INFO - 復元依頼CSV読み込み開始: restore_requests.csv
+2025-09-08 10:51:20,492 - restore_processor - INFO - 読み込み行数: 2
+2025-09-08 10:51:20,492 - restore_processor - INFO - 行 1: ヘッダー行をスキップ
+2025-09-08 10:51:20,494 - restore_processor - INFO - 行 2: 有効な復元依頼追加 (directoryモード) ✓
+2025-09-08 10:51:20,494 - restore_processor - INFO - CSV読み込み完了
+2025-09-08 10:51:20,495 - restore_processor - INFO -   - 有効な復元依頼数: 1
+2025-09-08 10:51:20,495 - restore_processor - INFO -     - ディレクトリ復元: 1件
+2025-09-08 10:51:20,496 - restore_processor - INFO -     - ファイル復元: 0件
+2025-09-08 10:51:20,496 - restore_processor - INFO -   - エラー項目数: 0
+2025-09-08 10:51:20,496 - restore_processor - INFO - データベースからファイル検索開始
+2025-09-08 10:51:20,534 - restore_processor - INFO - データベース接続: localhost:5432/archive_system
+2025-09-08 10:51:20,599 - restore_processor - INFO - データベース接続成功
+2025-09-08 10:51:20,600 - restore_processor - INFO - 検索開始: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\ (directoryモード)
+2025-09-08 10:51:20,602 - restore_processor - INFO - 生成された検索パターン数: 3
+2025-09-08 10:51:20,603 - restore_processor - INFO - 検索パターン 1: \\\\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\\test\\test_dir_04\\%
+2025-09-08 10:51:20,607 - restore_processor - INFO - パターン 1 結果: 20件
+2025-09-08 10:51:20,608 - restore_processor - INFO - ✓ パターン '\\\\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\\test\\test_dir_04\\%' で 20件発見
+2025-09-08 10:51:20,608 - restore_processor - INFO -   発見 1: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\test_0000_100MB_155710.dat
+2025-09-08 10:51:20,609 - restore_processor - INFO -   発見 2: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\test_0001_10MB_155727.dat
+2025-09-08 10:51:20,610 - restore_processor - INFO -   発見 3: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\test_0002_1MB_155729.dat
+2025-09-08 10:51:20,610 - restore_processor - INFO -   ... 他 17件
+2025-09-08 10:51:20,616 - restore_processor - INFO - 重複除去後: 20件
+2025-09-08 10:51:20,617 - restore_processor - INFO - ✓ ファイル検索完了: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\ -> 20件
+2025-09-08 10:51:20,617 - restore_processor - INFO -   検出ファイル 1: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\test_0000_100MB_155710.dat
+2025-09-08 10:51:20,617 - restore_processor - INFO -   検出ファイル 2: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\test_0001_10MB_155727.dat
+2025-09-08 10:51:20,618 - restore_processor - INFO -   検出ファイル 3: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\test_0002_1MB_155729.dat
+2025-09-08 10:51:20,618 - restore_processor - INFO -   ... 他 17件
+2025-09-08 10:51:20,619 - restore_processor - INFO - データベースファイル検索完了
+2025-09-08 10:51:20,619 - restore_processor - INFO -   - 総検出ファイル数: 20件
+2025-09-08 10:51:20,621 - restore_processor - INFO - S3復元リクエスト送信開始
+2025-09-08 10:51:20,932 - restore_processor - INFO - VPCエンドポイント経由で接続: https://bucket.vpce-0ba0c51973d7b36a1-uqz5v666.s3.ap-northeast-1.vpce.amazonaws.com
+2025-09-08 10:51:21,237 - restore_processor - INFO - S3クライアント初期化成功
+2025-09-08 10:51:21,238 - restore_processor - INFO - S3復元リクエスト送信
+2025-09-08 10:51:21,240 - restore_processor - INFO - 復元ティア: Standard
+2025-09-08 10:51:21,241 - restore_processor - INFO - 復元リクエスト処理中: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_04\ (20件)
+2025-09-08 10:51:26,215 - restore_processor - INFO - S3復元リクエスト送信完了
+2025-09-08 10:51:26,216 - restore_processor - INFO -   - 成功: 20件
+2025-09-08 10:51:26,218 - restore_processor - INFO -   - 失敗: 0件
+2025-09-08 10:51:26,222 - restore_processor - INFO - 復元ステータス保存: logs\restore_status_000004.json
+2025-09-08 10:51:26,223 - restore_processor - INFO - 復元リクエスト送信完了 - 20件
+2025-09-08 10:51:26,223 - restore_processor - INFO - 48時間後にダウンロード処理を実行してください:
+2025-09-08 10:51:26,224 - restore_processor - INFO - python restore_script_main.py restore_requests.csv 000004 --download-only
+2025-09-08 10:51:26,224 - restore_processor - INFO - === 復元処理統計 ===
+2025-09-08 10:51:26,225 - restore_processor - INFO - 処理時間: 0:00:05.736993
+2025-09-08 10:51:26,225 - restore_processor - INFO - CSV検証エラー数: 0
+2025-09-08 10:51:26,226 - restore_processor - INFO - 総復元依頼数: 1
+2025-09-08 10:51:26,226 - restore_processor - INFO -   - ディレクトリ復元: 1件
+2025-09-08 10:51:26,232 - restore_processor - INFO -   - ファイル復元: 0件
+2025-09-08 10:51:26,232 - restore_processor - INFO - 検出ファイル数: 20
+2025-09-08 10:51:26,233 - restore_processor - INFO - 復元リクエスト送信数: 20
+2025-09-08 10:51:26,234 - restore_processor - INFO - 復元完了数: 0
+2025-09-08 10:51:26,234 - restore_processor - INFO - 失敗数: 0
