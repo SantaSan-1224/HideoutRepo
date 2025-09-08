@@ -1,0 +1,32 @@
+
+PS C:\temp\archive\archive_system> python .\debug_db_search.py
+データベース接続成功
+検索対象パス: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\
+パス長: 68
+総レコード数: 40
+サンプルデータ:
+  1: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_01\test_0000_100MB_155610.dat
+  2: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_01\test_0001_10MB_155627.dat
+  3: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_01\test_0002_1MB_155629.dat
+test_dir_02を含むパス: 20件
+  - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\test_0000_100MB_155630.dat
+  - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\test_0001_10MB_155647.dat
+  - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\test_0002_1MB_155649.dat
+  - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\test_0003_1MB_155649.dat
+  - \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\test_0004_100KB_155650.dat
+
+検索パターンテスト:
+  パターン 1: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\% -> 0件
+  パターン 2: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\% -> 0件
+  パターン 3: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\* -> 0件
+  パターン 4: %test_dir_02% -> 20件
+    例: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\test_0000_100MB_155630.dat
+    例: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_02\test_0001_10MB_155647.dat
+  パターン 5: %test_dir_02\% -> 0件
+  パターン 6: %test_dir_02/% -> 0件
+
+サーバー名'amznfsxbeak7dyp'を含むパス: 40件
+  例: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_01\test_0000_100MB_155610.dat
+  例: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_01\test_0001_10MB_155627.dat
+  例: \\amznfsxbeak7dyp.priv-req-gl01.fujifilm-intra.com\test\test_dir_01\test_0002_1MB_155629.dat
+PS C:\temp\archive\archive_system>
