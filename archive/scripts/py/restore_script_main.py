@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-復元スクリプト（ディレクトリ・ファイル混合対応版）- デバッグ強化
+復元スクリプト（ディレクトリ・ファイル混合対応版）- PostgreSQLエスケープ対応
 AWS S3 Glacier Deep Archiveからファイルサーバへの復元処理
 """
 
@@ -287,7 +287,7 @@ class RestoreProcessor:
             return {'valid': False, 'error_reason': f'検証エラー: {str(e)}'}
     
     def lookup_files_from_database(self, restore_requests: List[Dict]) -> List[Dict]:
-        """データベースから復元対象ファイルを検索（デバッグ強化版）"""
+        """データベースから復元対象ファイルを検索（PostgreSQLエスケープ対応版）"""
         self.logger.info("データベースからファイル検索開始")
         
         try:
@@ -305,27 +305,94 @@ class RestoreProcessor:
                         if restore_mode == 'directory':
                             # ディレクトリ復元: 複数パターンでLIKE検索
                             search_patterns = self._generate_search_patterns(restore_path)
+                            self.logger.info(f"生成された検索パターン数: {len(search_patterns)}")
                             
                             found_files = []
-                            for pattern in search_patterns:
-                                self.logger.debug(f"検索パターン: {pattern}")
+                            for i, pattern in enumerate(search_patterns, 1):
+                                self.logger.info(f"検索パターン {i}: {pattern}")
                                 
-                                cursor.execute(
-                                    "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path LIKE %s ORDER BY original_file_path",
-                                    (pattern,)
-                                )
+                                try:
+                                    # 標準的なLIKE検索
+                                    cursor.execute(
+                                        "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path LIKE %s ORDER BY original_file_path",
+                                        (pattern,)
+                                    )
+                                    
+                                    results = cursor.fetchall()
+                                    self.logger.info(f"パターン {i} 結果: {len(results)}件")
+                                    
+                                    if results:
+                                        self.logger.info(f"✓ パターン '{pattern}' で {len(results)}件発見")
+                                        # 最初の3件のパスを表示
+                                        for j, row in enumerate(results[:3]):
+                                            self.logger.info(f"  発見 {j+1}: {row[0]}")
+                                        if len(results) > 3:
+                                            self.logger.info(f"  ... 他 {len(results)-3}件")
+                                        found_files.extend(results)
+                                        break  # 成功したらループを抜ける
+                                    else:
+                                        self.logger.debug(f"パターン '{pattern}' では見つからず")
+                                        
+                                except Exception as e:
+                                    self.logger.warning(f"パターン {i} でエラー: {str(e)}")
+                                    continue
+                            
+                            # パターン検索で見つからない場合の代替検索
+                            if not found_files:
+                                self.logger.info("代替検索を実行中...")
                                 
-                                results = cursor.fetchall()
-                                if results:
-                                    self.logger.info(f"パターン '{pattern}' で {len(results)}件発見")
-                                    found_files.extend(results)
-                                else:
-                                    self.logger.debug(f"パターン '{pattern}' では見つからず")
+                                # ディレクトリ名部分を抽出
+                                path_parts = restore_path.replace('/', '\\').split('\\')
+                                dir_name = None
+                                for part in reversed(path_parts):
+                                    if part.strip():
+                                        dir_name = part
+                                        break
+                                
+                                if dir_name:
+                                    alternative_patterns = [
+                                        f"%{dir_name}%",  # ディレクトリ名部分のみ
+                                        f"%{dir_name}\\%"  # ディレクトリ名+区切り文字
+                                    ]
+                                    
+                                    for alt_pattern in alternative_patterns:
+                                        self.logger.info(f"代替パターン: {alt_pattern}")
+                                        try:
+                                            cursor.execute(
+                                                "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path LIKE %s ORDER BY original_file_path",
+                                                (alt_pattern,)
+                                            )
+                                            
+                                            results = cursor.fetchall()
+                                            if results:
+                                                # 元のパスと関連があるかチェック
+                                                filtered_results = []
+                                                for row in results:
+                                                    original_path = row[0]
+                                                    # より厳密なフィルタリング（サーバー名も一致するか）
+                                                    if restore_path.split('\\')[0] in original_path:
+                                                        filtered_results.append(row)
+                                                
+                                                if filtered_results:
+                                                    self.logger.info(f"✓ 代替パターンで {len(filtered_results)}件発見")
+                                                    found_files.extend(filtered_results)
+                                                    break
+                                        except Exception as e:
+                                            self.logger.warning(f"代替パターンでエラー: {str(e)}")
                             
                             # 重複除去
-                            unique_files = list(set(found_files))
-                            results = unique_files
-                            
+                            if found_files:
+                                unique_files = []
+                                seen_paths = set()
+                                for row in found_files:
+                                    if row[0] not in seen_paths:
+                                        unique_files.append(row)
+                                        seen_paths.add(row[0])
+                                results = unique_files
+                                self.logger.info(f"重複除去後: {len(results)}件")
+                            else:
+                                results = []
+                                
                         else:
                             # ファイル復元: 完全一致検索
                             self.logger.info(f"ファイル検索: {restore_path}")
@@ -335,6 +402,7 @@ class RestoreProcessor:
                                 (restore_path,)
                             )
                             results = cursor.fetchall()
+                            self.logger.info(f"ファイル検索結果: {len(results)}件")
                         
                         if results:
                             files_found = []
@@ -356,14 +424,13 @@ class RestoreProcessor:
                             request['files_found'] = files_found
                             request['total_files_found'] = len(files_found)
                             
-                            self.logger.info(f"ファイル検索完了: {restore_path} -> {len(files_found)}件")
+                            self.logger.info(f"✓ ファイル検索完了: {restore_path} -> {len(files_found)}件")
                             
-                            # 検出ファイルの例を表示（デバッグ用）
-                            if files_found:
-                                for i, file_info in enumerate(files_found[:3]):  # 最初の3件のみ
-                                    self.logger.debug(f"  検出ファイル {i+1}: {file_info['original_file_path']}")
-                                if len(files_found) > 3:
-                                    self.logger.debug(f"  ... 他 {len(files_found)-3}件")
+                            # 検出ファイルの例を表示（最初の3件のみ）
+                            for i, file_info in enumerate(files_found[:3]):
+                                self.logger.info(f"  検出ファイル {i+1}: {file_info['original_file_path']}")
+                            if len(files_found) > 3:
+                                self.logger.info(f"  ... 他 {len(files_found)-3}件")
                             
                         else:
                             request['files_found'] = []
@@ -371,18 +438,33 @@ class RestoreProcessor:
                             request['error'] = 'データベースにアーカイブ履歴が見つかりません'
                             self.logger.error(f"ファイル見つからず: {restore_path}")
                             
-                            # デバッグ: 類似パスの検索
-                            self._debug_similar_paths(cursor, restore_path)
-            
-            # 統計更新
-            total_files = sum(req.get('total_files_found', 0) for req in restore_requests)
-            self.stats['total_files_found'] = total_files
-            
-            self.logger.info("データベースファイル検索完了")
-            self.logger.info(f"  - 総検出ファイル数: {total_files}件")
-            
-            return restore_requests
-            
+                            # デバッグ情報
+                            self.logger.info("=== 検索失敗時のデバッグ情報 ===")
+                            try:
+                                # ディレクトリ名での検索結果を表示
+                                path_parts = restore_path.replace('/', '\\').split('\\')
+                                dir_name = None
+                                for part in reversed(path_parts):
+                                    if part.strip():
+                                        dir_name = part
+                                        break
+                                
+                                if dir_name:
+                                    cursor.execute("SELECT COUNT(*) FROM archive_history WHERE original_file_path LIKE %s", (f"%{dir_name}%",))
+                                    related_count = cursor.fetchone()[0]
+                                    self.logger.info(f"関連ファイル数（'{dir_name}'を含む）: {related_count}")
+                            except Exception:
+                                pass
+                
+                # 統計更新
+                total_files = sum(req.get('total_files_found', 0) for req in restore_requests)
+                self.stats['total_files_found'] = total_files
+                
+                self.logger.info("データベースファイル検索完了")
+                self.logger.info(f"  - 総検出ファイル数: {total_files}件")
+                
+                return restore_requests
+                
         except Exception as e:
             self.logger.error(f"データベース検索エラー: {str(e)}")
             # エラー時は全リクエストにエラーマーク
@@ -400,81 +482,36 @@ class RestoreProcessor:
                 pass
 
     def _generate_search_patterns(self, restore_path: str) -> List[str]:
-        """ディレクトリ検索用の複数検索パターンを生成"""
+        """ディレクトリ検索用の複数検索パターンを生成（PostgreSQLエスケープ対応）"""
         patterns = []
         
         # パスの正規化
         normalized_path = restore_path.replace('/', '\\')
         
+        # PostgreSQLのLIKE検索でバックスラッシュをエスケープ
+        # \\ -> \\\\（PostgreSQLでは\が特殊文字なので二重エスケープが必要）
+        escaped_path = normalized_path.replace('\\', '\\\\')
+        
         # パターン1: 末尾に\がある場合
         if normalized_path.endswith('\\'):
-            patterns.append(f"{normalized_path}%")
-            patterns.append(f"{normalized_path[:-1]}\\%")  # 冗長だが念のため
+            patterns.append(f"{escaped_path}%")
+            # 念のため、末尾の\を除去した版も追加
+            patterns.append(f"{escaped_path[:-2]}\\\\%")  # 最後の\\\\を除去して\\\\%を追加
         else:
             # パターン2: 末尾に\がない場合
-            patterns.append(f"{normalized_path}\\%")
-            patterns.append(f"{normalized_path}%")  # \なしでも試す
+            patterns.append(f"{escaped_path}\\\\%")
+            patterns.append(f"{escaped_path}%")
         
-        # パターン3: /区切りでも試す
-        unix_path = restore_path.replace('\\', '/')
-        if unix_path.endswith('/'):
-            patterns.append(f"{unix_path}%")
+        # 追加パターン: 異なるエスケープ方法
+        # 単一エスケープ版も試す
+        single_escaped = normalized_path.replace('\\', '\\')  # そのまま
+        if single_escaped.endswith('\\'):
+            patterns.append(f"{single_escaped}%")
         else:
-            patterns.append(f"{unix_path}/%")
-            patterns.append(f"{unix_path}%")
+            patterns.append(f"{single_escaped}\\%")
         
         return patterns
 
-    def _debug_similar_paths(self, cursor, restore_path: str):
-        """デバッグ用：類似パスの検索"""
-        try:
-            # パスの一部を使って類似パスを検索
-            path_parts = restore_path.replace('/', '\\').split('\\')
-            
-            if len(path_parts) >= 2:
-                # 最後の2つの部分を使って検索
-                search_term = '\\'.join(path_parts[-2:])
-                
-                cursor.execute(
-                    "SELECT original_file_path FROM archive_history WHERE original_file_path LIKE %s LIMIT 5",
-                    (f"%{search_term}%",)
-                )
-                
-                similar_results = cursor.fetchall()
-                if similar_results:
-                    self.logger.debug(f"類似パス検索結果 ('{search_term}' を含む):")
-                    for row in similar_results:
-                        self.logger.debug(f"  - {row[0]}")
-                else:
-                    self.logger.debug(f"類似パス検索でも見つからず ('{search_term}' を含む)")
-                    
-                    # さらに緩い検索
-                    if len(path_parts) >= 1:
-                        loose_term = path_parts[-1]
-                        cursor.execute(
-                            "SELECT original_file_path FROM archive_history WHERE original_file_path LIKE %s LIMIT 3",
-                            (f"%{loose_term}%",)
-                        )
-                        
-                        loose_results = cursor.fetchall()
-                        if loose_results:
-                            self.logger.debug(f"緩い検索結果 ('{loose_term}' を含む):")
-                            for row in loose_results:
-                                self.logger.debug(f"  - {row[0]}")
-                        else:
-                            self.logger.debug("緩い検索でも見つからず")
-                            
-                            # 全体のサンプル表示
-                            cursor.execute("SELECT original_file_path FROM archive_history LIMIT 3")
-                            sample_results = cursor.fetchall()
-                            if sample_results:
-                                self.logger.debug("データベース内のサンプルパス:")
-                                for row in sample_results:
-                                    self.logger.debug(f"  - {row[0]}")
-        
-        except Exception as e:
-            self.logger.debug(f"デバッグ検索エラー: {str(e)}")
-    
     def _calculate_relative_path(self, original_path: str, restore_path: str, restore_mode: str) -> str:
         """復元時の相対パスを計算（階層構造保持用）"""
         try:
