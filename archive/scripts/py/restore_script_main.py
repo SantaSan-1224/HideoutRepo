@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-復元スクリプト（ディレクトリ・ファイル混合対応版）
+復元スクリプト（ディレクトリ・ファイル混合対応版）- デバッグ強化
 AWS S3 Glacier Deep Archiveからファイルサーバへの復元処理
 """
 
@@ -287,7 +287,7 @@ class RestoreProcessor:
             return {'valid': False, 'error_reason': f'検証エラー: {str(e)}'}
     
     def lookup_files_from_database(self, restore_requests: List[Dict]) -> List[Dict]:
-        """データベースから復元対象ファイルを検索（ディレクトリ・ファイル混合対応）"""
+        """データベースから復元対象ファイルを検索（デバッグ強化版）"""
         self.logger.info("データベースからファイル検索開始")
         
         try:
@@ -300,19 +300,31 @@ class RestoreProcessor:
                         restore_path = request['restore_path']
                         restore_mode = request['restore_mode']
                         
+                        self.logger.info(f"検索開始: {restore_path} ({restore_mode}モード)")
+                        
                         if restore_mode == 'directory':
-                            # ディレクトリ復元: LIKE検索
-                            self.logger.info(f"ディレクトリ検索: {restore_path}")
+                            # ディレクトリ復元: 複数パターンでLIKE検索
+                            search_patterns = self._generate_search_patterns(restore_path)
                             
-                            # パスの正規化（末尾の区切り文字を確保）
-                            search_path = restore_path
-                            if not search_path.endswith(('\\', '/')):
-                                search_path += '\\'
+                            found_files = []
+                            for pattern in search_patterns:
+                                self.logger.debug(f"検索パターン: {pattern}")
+                                
+                                cursor.execute(
+                                    "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path LIKE %s ORDER BY original_file_path",
+                                    (pattern,)
+                                )
+                                
+                                results = cursor.fetchall()
+                                if results:
+                                    self.logger.info(f"パターン '{pattern}' で {len(results)}件発見")
+                                    found_files.extend(results)
+                                else:
+                                    self.logger.debug(f"パターン '{pattern}' では見つからず")
                             
-                            cursor.execute(
-                                "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path LIKE %s ORDER BY original_file_path",
-                                (f"{search_path}%",)
-                            )
+                            # 重複除去
+                            unique_files = list(set(found_files))
+                            results = unique_files
                             
                         else:
                             # ファイル復元: 完全一致検索
@@ -322,8 +334,7 @@ class RestoreProcessor:
                                 "SELECT original_file_path, s3_path, archive_date, file_size FROM archive_history WHERE original_file_path = %s",
                                 (restore_path,)
                             )
-                        
-                        results = cursor.fetchall()
+                            results = cursor.fetchall()
                         
                         if results:
                             files_found = []
@@ -347,11 +358,21 @@ class RestoreProcessor:
                             
                             self.logger.info(f"ファイル検索完了: {restore_path} -> {len(files_found)}件")
                             
+                            # 検出ファイルの例を表示（デバッグ用）
+                            if files_found:
+                                for i, file_info in enumerate(files_found[:3]):  # 最初の3件のみ
+                                    self.logger.debug(f"  検出ファイル {i+1}: {file_info['original_file_path']}")
+                                if len(files_found) > 3:
+                                    self.logger.debug(f"  ... 他 {len(files_found)-3}件")
+                            
                         else:
                             request['files_found'] = []
                             request['total_files_found'] = 0
                             request['error'] = 'データベースにアーカイブ履歴が見つかりません'
                             self.logger.error(f"ファイル見つからず: {restore_path}")
+                            
+                            # デバッグ: 類似パスの検索
+                            self._debug_similar_paths(cursor, restore_path)
             
             # 統計更新
             total_files = sum(req.get('total_files_found', 0) for req in restore_requests)
@@ -377,6 +398,82 @@ class RestoreProcessor:
                     conn.close()
             except Exception:
                 pass
+
+    def _generate_search_patterns(self, restore_path: str) -> List[str]:
+        """ディレクトリ検索用の複数検索パターンを生成"""
+        patterns = []
+        
+        # パスの正規化
+        normalized_path = restore_path.replace('/', '\\')
+        
+        # パターン1: 末尾に\がある場合
+        if normalized_path.endswith('\\'):
+            patterns.append(f"{normalized_path}%")
+            patterns.append(f"{normalized_path[:-1]}\\%")  # 冗長だが念のため
+        else:
+            # パターン2: 末尾に\がない場合
+            patterns.append(f"{normalized_path}\\%")
+            patterns.append(f"{normalized_path}%")  # \なしでも試す
+        
+        # パターン3: /区切りでも試す
+        unix_path = restore_path.replace('\\', '/')
+        if unix_path.endswith('/'):
+            patterns.append(f"{unix_path}%")
+        else:
+            patterns.append(f"{unix_path}/%")
+            patterns.append(f"{unix_path}%")
+        
+        return patterns
+
+    def _debug_similar_paths(self, cursor, restore_path: str):
+        """デバッグ用：類似パスの検索"""
+        try:
+            # パスの一部を使って類似パスを検索
+            path_parts = restore_path.replace('/', '\\').split('\\')
+            
+            if len(path_parts) >= 2:
+                # 最後の2つの部分を使って検索
+                search_term = '\\'.join(path_parts[-2:])
+                
+                cursor.execute(
+                    "SELECT original_file_path FROM archive_history WHERE original_file_path LIKE %s LIMIT 5",
+                    (f"%{search_term}%",)
+                )
+                
+                similar_results = cursor.fetchall()
+                if similar_results:
+                    self.logger.debug(f"類似パス検索結果 ('{search_term}' を含む):")
+                    for row in similar_results:
+                        self.logger.debug(f"  - {row[0]}")
+                else:
+                    self.logger.debug(f"類似パス検索でも見つからず ('{search_term}' を含む)")
+                    
+                    # さらに緩い検索
+                    if len(path_parts) >= 1:
+                        loose_term = path_parts[-1]
+                        cursor.execute(
+                            "SELECT original_file_path FROM archive_history WHERE original_file_path LIKE %s LIMIT 3",
+                            (f"%{loose_term}%",)
+                        )
+                        
+                        loose_results = cursor.fetchall()
+                        if loose_results:
+                            self.logger.debug(f"緩い検索結果 ('{loose_term}' を含む):")
+                            for row in loose_results:
+                                self.logger.debug(f"  - {row[0]}")
+                        else:
+                            self.logger.debug("緩い検索でも見つからず")
+                            
+                            # 全体のサンプル表示
+                            cursor.execute("SELECT original_file_path FROM archive_history LIMIT 3")
+                            sample_results = cursor.fetchall()
+                            if sample_results:
+                                self.logger.debug("データベース内のサンプルパス:")
+                                for row in sample_results:
+                                    self.logger.debug(f"  - {row[0]}")
+        
+        except Exception as e:
+            self.logger.debug(f"デバッグ検索エラー: {str(e)}")
     
     def _calculate_relative_path(self, original_path: str, restore_path: str, restore_mode: str) -> str:
         """復元時の相対パスを計算（階層構造保持用）"""
@@ -782,7 +879,7 @@ class RestoreProcessor:
                 temp_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.path.basename(original_path)}"
                 temp_file_path = temp_path / temp_filename
                 
-                # S3からダウンロード（リトライ付き）
+                # S3からダウンロード（リトライ付）
                 download_result = self._download_file_with_retry(
                     s3_client, bucket, key, str(temp_file_path), retry_count
                 )
@@ -841,7 +938,7 @@ class RestoreProcessor:
 
     def _download_file_with_retry(self, s3_client, bucket: str, key: str, 
                                  local_path: str, max_retries: int) -> Dict:
-        """S3からファイルダウンロード（リトライ付き）"""
+        """S3からファイルダウンロード（リトライ付）"""
         
         for attempt in range(max_retries):
             try:
