@@ -513,63 +513,82 @@ class RestoreProcessor:
         return patterns
 
     def _calculate_relative_path(self, original_path: str, restore_path: str, restore_mode: str) -> str:
-        """復元時の相対パスを計算（階層構造保持用）"""
-        try:
-            if restore_mode == 'file':
-                # ファイル復元の場合はファイル名のみ
-                return os.path.basename(original_path)
-            else:
-                # ディレクトリ復元の場合は相対パスを計算
-                # 例: original_path = "\\server\share\project\sub\file.txt"
-                #     restore_path = "\\server\share\project\"
-                #     -> relative_path = "sub\file.txt"
-                
-                # パスの正規化
-                orig_normalized = original_path.replace('/', '\\')
-                restore_normalized = restore_path.replace('/', '\\')
-                
-                if not restore_normalized.endswith('\\'):
-                    restore_normalized += '\\'
-                
-                if orig_normalized.startswith(restore_normalized):
-                    relative = orig_normalized[len(restore_normalized):]
-                    
-                    # 相対パスが空でない場合はそのまま返す
-                    if relative:
-                        return relative
-                    else:
-                        # 相対パスが空の場合（直下のファイル）はファイル名のみ
-                        return os.path.basename(original_path)
+            """復元時の相対パスを計算（階層構造保持用・修正版）"""
+            try:
+                if restore_mode == 'file':
+                    # ファイル復元の場合はファイル名のみ
+                    return os.path.basename(original_path)
                 else:
-                    # パスが一致しない場合
-                    # より柔軟な相対パス計算を試行
-                    self.logger.debug(f"パス不一致のため代替計算: {original_path} vs {restore_path}")
+                    # ディレクトリ復元の場合は相対パスを計算
+                    # 例: original_path = "\\server\share\project\sub\file.txt"
+                    #     restore_path = "\\server\share\project\"
+                    #     -> relative_path = "sub\file.txt"
                     
-                    # 復元対象パスの最後の有効なディレクトリ部分を特定
-                    restore_parts = [p for p in restore_normalized.split('\\') if p]
-                    orig_parts = [p for p in orig_normalized.split('\\') if p]
+                    # パスの正規化
+                    orig_normalized = original_path.replace('/', '\\').rstrip('\\')
+                    restore_normalized = restore_path.replace('/', '\\').rstrip('\\')
                     
-                    # 共通部分を見つけて相対パスを計算
-                    common_length = 0
-                    for i, (rp, op) in enumerate(zip(restore_parts, orig_parts)):
-                        if rp.lower() == op.lower():  # 大文字小文字を無視して比較
-                            common_length = i + 1
+                    self.logger.debug(f"相対パス計算: orig='{orig_normalized}', restore='{restore_normalized}'")
+                    
+                    # 大文字小文字を無視した比較用
+                    orig_lower = orig_normalized.lower()
+                    restore_lower = restore_normalized.lower()
+                    
+                    if orig_lower.startswith(restore_lower + '\\'):
+                        # 復元対象ディレクトリ以下のファイルの場合
+                        relative = orig_normalized[len(restore_normalized) + 1:]  # +1 は '\' の分
+                        
+                        if relative:
+                            self.logger.debug(f"計算された相対パス: '{relative}'")
+                            return relative
                         else:
-                            break
-                    
-                    # 復元対象ディレクトリより後の部分を相対パスとする
-                    if common_length > 0 and len(orig_parts) > common_length:
-                        relative_parts = orig_parts[common_length:]
-                        relative_path = '\\'.join(relative_parts)
-                        self.logger.debug(f"代替計算による相対パス: {relative_path}")
-                        return relative_path
+                            # 相対パスが空の場合（直下のファイル）はファイル名のみ
+                            filename = os.path.basename(original_path)
+                            self.logger.debug(f"直下ファイル（相対パス空）: '{filename}'")
+                            return filename
+                    elif orig_lower == restore_lower:
+                        # 元ファイルパスと復元パスが同じ場合（ディレクトリ自体を指す場合）
+                        filename = os.path.basename(original_path)
+                        self.logger.debug(f"同一パス（ディレクトリ自体）: '{filename}'")
+                        return filename
                     else:
-                        # 最終手段：ファイル名のみ
-                        return os.path.basename(original_path)
-                    
-        except Exception as e:
-            self.logger.warning(f"相対パス計算エラー: {e}")
-            return os.path.basename(original_path)
+                        # パスが一致しない場合の代替計算
+                        self.logger.debug(f"パス不一致のため代替計算実行")
+                        
+                        # パス部分を分割
+                        restore_parts = [p for p in restore_normalized.split('\\') if p]
+                        orig_parts = [p for p in orig_normalized.split('\\') if p]
+                        
+                        # 共通部分を後ろから検索（より柔軟な一致判定）
+                        common_end_index = -1
+                        for i in range(min(len(restore_parts), len(orig_parts))):
+                            if restore_parts[i].lower() == orig_parts[i].lower():
+                                common_end_index = i
+                            else:
+                                break
+                        
+                        # 復元対象ディレクトリより後の部分を相対パスとする
+                        if common_end_index >= 0 and len(orig_parts) > len(restore_parts):
+                            # 復元対象ディレクトリ以下の相対パスを構築
+                            relative_parts = orig_parts[len(restore_parts):]
+                            relative_path = '\\'.join(relative_parts)
+                            self.logger.debug(f"代替計算による相対パス: '{relative_path}'")
+                            return relative_path
+                        elif common_end_index >= 0 and len(orig_parts) > common_end_index + 1:
+                            # より柔軟な相対パス計算
+                            relative_parts = orig_parts[common_end_index + 1:]
+                            relative_path = '\\'.join(relative_parts)
+                            self.logger.debug(f"柔軟計算による相対パス: '{relative_path}'")
+                            return relative_path
+                        else:
+                            # 最終手段：ファイル名のみ
+                            filename = os.path.basename(original_path)
+                            self.logger.debug(f"最終手段（ファイル名のみ）: '{filename}'")
+                            return filename
+                        
+            except Exception as e:
+                self.logger.warning(f"相対パス計算エラー: {e}")
+                return os.path.basename(original_path)
     
     def _connect_database(self):
         """データベース接続（アーカイブスクリプトと共通）"""
