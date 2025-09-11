@@ -1,340 +1,440 @@
-# アーカイブスクリプト仕様書
+# アーカイブスクリプト仕様書（archive_script_main.py）
 
 ## 1. 概要
 
 ### 1.1 目的
-企業内ファイルサーバ上のファイルをAWS S3 Glacier Deep Archiveにアーカイブし、履歴をデータベースに記録するPythonスクリプト。
 
-### 1.2 スクリプト名
-`archive_script_main.py`
+企業内ファイルサーバ（FSx for Windows File Server）上のファイルを、ユーザー依頼に基づいて AWS S3（Glacier Deep Archive）にアーカイブし、元ファイルの削除とディレクトリリネーム機能を提供する。
 
-### 1.3 実行環境
-- **Python**: 3.8以上
-- **OS**: Windows Server（FSxアクセス用）
-- **AWS**: EC2インスタンス（4vCPU、16GBメモリ）
+### 1.2 実装状況
 
-## 2. 機能仕様
+✅ **実装完了・実機検証済み**
 
-### 2.1 主要機能
-1. **CSV読み込み・検証**: ディレクトリパスの妥当性チェック
-2. **ファイル収集**: 対象ディレクトリ内のファイル列挙
-3. **S3アップロード**: Glacier Deep Archiveへの直接転送
-4. **アーカイブ後処理**: 空ファイル作成・元ファイル削除
-5. **データベース登録**: PostgreSQLへの履歴記録
-6. **エラーハンドリング**: 再試行可能なエラーCSV生成
+- CSV 読み込み・検証機能
+- ファイル収集・S3 アップロード機能
+- 元ファイル削除機能（空ファイル作成は廃止）
+- ディレクトリリネーム機能
+- PostgreSQL データベース連携
+- エラーハンドリング・再試行 CSV 生成
 
-### 2.2 入力仕様
+### 1.3 技術仕様
 
-#### 2.2.1 コマンドライン引数
-```bash
-python archive_script_main.py <csv_path> <request_id> [--config <config_path>]
+- **言語**: Python 3.13
+- **依存ライブラリ**: boto3, psycopg2-binary, pathlib
+- **データベース**: PostgreSQL 13 以上
+- **ストレージ**: AWS S3 Glacier Deep Archive
+- **設定ファイル**: config/archive_config.json
+
+## 2. 処理フロー
+
+```mermaid
+flowchart TD
+    Start([開始]) --> CSV_Input[📄 CSV読み込み<br/>ディレクトリパス検証]
+
+    CSV_Input --> CSV_Error{CSV検証<br/>エラー？}
+    CSV_Error -->|Yes| CSV_Retry[📄 再試行用CSV生成<br/>logs/]
+    CSV_Error -->|No| File_Collect[📁 ファイル収集<br/>対象ディレクトリ走査]
+    CSV_Retry --> File_Collect
+
+    File_Collect --> S3_Upload[☁️ S3アップロード<br/>Glacier Deep Archive]
+
+    S3_Upload --> Upload_Success{アップロード<br/>成功？}
+    Upload_Success -->|No| Archive_Error[📄 アーカイブエラーCSV<br/>再試行用フォーマット]
+    Upload_Success -->|Yes| Delete_Original[🗑️ 元ファイル削除]
+
+    Delete_Original --> Delete_Success{削除<br/>成功？}
+    Delete_Success -->|No| Archive_Error
+    Delete_Success -->|Yes| DB_Insert[🗄️ DB登録<br/>archive_history]
+
+    Archive_Error --> Dir_Rename
+    DB_Insert --> Dir_Rename[📁 ディレクトリリネーム<br/>_archived追加]
+    Dir_Rename --> Process_End([処理完了])
 ```
 
-| 引数 | 必須 | 説明 | 例 |
-|------|------|------|-----|
-| csv_path | ✓ | 対象ディレクトリを記載したCSVファイルパス | `requests.csv` |
-| request_id | ✓ | アーカイブ依頼ID | `REQ-2025-001` |
-| --config | - | 設定ファイルパス | `config/archive_config.json` |
+## 3. 入力仕様
 
-#### 2.2.2 CSVファイル形式
+### 3.1 CSV フォーマット
+
 ```csv
 Directory Path
-\\server\share\project1
-\\server\share\project2
-C:\local\directory
+\\server\project1\
+\\server\project2\archived_folder\
+C:\local\data\
 ```
 
-**仕様**:
-- **エンコーディング**: UTF-8-SIG
-- **ヘッダー**: "Directory Path"または"Path"を含む行（自動検出）
-- **データ行**: 1行1ディレクトリパス
-- **パス形式**: UNCパス（`\\server\share`）またはローカルパス（`C:\path`）
+### 3.2 CSV 検証項目
 
-#### 2.2.3 設定ファイル形式
+- **ファイル形式**: UTF-8-SIG エンコーディング
+- **パス長制限**: 260 文字以内
+- **無効文字チェック**: `< > : " | ? *` を含まない
+- **存在確認**: ディレクトリの存在・読み取り権限確認
+- **ディレクトリ判定**: ファイルでないことを確認
+
+### 3.3 除外条件
+
+- **拡張子除外**: `.tmp`, `.lock`, `.bak` ファイル
+- **最大ファイルサイズ**: 10GB 制限
+- **アクセス不可ファイル**: 権限エラー・ロック中ファイル
+
+## 4. S3 アップロード仕様
+
+### 4.1 ストレージクラス
+
+- **設定値**: `GLACIER_DEEP_ARCHIVE` → 自動的に `DEEP_ARCHIVE` に変換
+- **有効値**: `STANDARD`, `STANDARD_IA`, `GLACIER`, `DEEP_ARCHIVE`
+- **フォールバック**: 無効値の場合は `STANDARD` を使用
+
+### 4.2 S3 キー生成ルール
+
+```python
+# UNCパス例
+\\server\share\path\file.txt → server/share/path/file.txt
+
+# ドライブレター例
+C:\path\file.txt → local_c/path/file.txt
+
+# その他
+/other/path → other/other/path
+```
+
+### 4.3 アップロード設定
+
+- **リトライ回数**: 3 回（設定可能）
+- **VPC エンドポイント**: 対応済み
+- **接続テスト**: head_bucket による事前検証
+- **エラーハンドリング**: ファイル単位での部分失敗対応
+
+## 5. アーカイブ後処理
+
+### 5.1 元ファイル削除（仕様変更）
+
+**旧仕様（廃止）**: 空ファイル（`元ファイル名_archived.txt`）作成
+**新仕様**: 元ファイルの完全削除のみ
+
+```python
+# 実装内容
+def create_archived_files(self, results: List[Dict]) -> List[Dict]:
+    """元ファイル削除のみ実行（空ファイル作成は廃止）"""
+    for result in successful_results:
+        if result.get('success', False):
+            os.remove(file_path)  # 元ファイル削除
+            # 空ファイル作成処理は削除済み
+```
+
+### 5.2 ディレクトリリネーム機能（新機能）
+
+全ファイルのアーカイブ処理完了後、対象ディレクトリに接尾辞を追加
+
+```python
+def rename_archived_directories(self, results: List[Dict]) -> None:
+    """ディレクトリ名変更: project1 → project1_archived"""
+
+    # 各ディレクトリの処理完了状況確認
+    directory_stats = self._calculate_directory_completion(results)
+
+    for directory_path, stats in directory_stats.items():
+        if stats['processed'] == stats['total']:
+            archived_path = f"{directory_path}_archived"
+            os.rename(directory_path, archived_path)
+```
+
+**リネーム仕様**:
+
+- **接尾辞**: `_archived`（設定ファイルで変更可能）
+- **実行条件**: ディレクトリ内全ファイルの処理完了時
+- **エラー対応**: 権限エラー時は手動対応を案内
+
+## 6. データベース連携
+
+### 6.1 PostgreSQL 接続
+
+```python
+def _connect_database(self):
+    """PostgreSQL接続（新機能）"""
+    conn_params = {
+        'host': db_config.get('host', 'localhost'),
+        'port': db_config.get('port', 5432),
+        'database': db_config.get('database', 'archive_system'),
+        'user': db_config.get('user', 'postgres'),
+        'password': db_config.get('password', ''),
+        'connect_timeout': db_config.get('timeout', 30)
+    }
+
+    conn = psycopg2.connect(**conn_params)
+    conn.autocommit = False  # トランザクション管理
+```
+
+### 6.2 登録データ
+
+アーカイブ処理完了ファイルのみを archive_history テーブルに登録
+
+```sql
+INSERT INTO archive_history (
+    request_id, requester, request_date,
+    original_file_path, s3_path, archive_date, file_size
+) VALUES (%s, %s, %s, %s, %s, %s, %s)
+```
+
+## 7. エラーハンドリング
+
+### 7.1 CSV 検証エラー
+
+**出力ファイル**: `logs/{元ファイル名}_csv_retry_{timestamp}.csv`
+**フォーマット**: 元 CSV と同じ形式（再実行可能）
+
+### 7.2 アーカイブエラー
+
+**出力ファイル**: `logs/{元ファイル名}_archive_retry_{timestamp}.csv`
+**対象**: S3 アップロード失敗またはアーカイブ後処理失敗ディレクトリ
+
+### 7.3 エラー分類
+
+| エラー種別             | 処理継続 | リトライ | 出力ファイル |
+| ---------------------- | -------- | -------- | ------------ |
+| CSV 読み込みエラー     | ×        | -        | -            |
+| CSV 検証エラー         | ✓        | -        | CSV 再試行用 |
+| S3 接続エラー          | ×        | -        | -            |
+| S3 操作エラー          | ✓        | ✓        | CSV 再試行用 |
+| ファイルアクセスエラー | ✓        | ×        | CSV 再試行用 |
+| データベース接続エラー | ✓        | ×        | -            |
+
+## 8. 設定ファイル仕様（最適化版）
+
+### 8.1 config/archive_config.json
+
 ```json
 {
-    "aws": {
-        "region": "ap-northeast-1",
-        "s3_bucket": "your-bucket-name",
-        "storage_class": "DEEP_ARCHIVE",
-        "vpc_endpoint_url": "https://bucket.vpce-xxx.s3.region.vpce.amazonaws.com"
-    },
-    "database": {
-        "host": "localhost",
-        "port": 5432,
-        "database": "archive_system",
-        "user": "postgres",
-        "password": "password",
-        "timeout": 30
-    },
-    "request": {
-        "requester": "12345678"
-    },
-    "file_server": {
-        "archived_suffix": "_archived",
-        "exclude_extensions": [".tmp", ".lock", ".bak"]
-    },
-    "processing": {
-        "max_file_size": 10737418240,
-        "chunk_size": 8388608,
-        "retry_count": 3
-    },
-    "logging": {
-        "log_directory": "logs",
-        "log_level": "INFO"
-    }
+  "aws": {
+    "region": "ap-northeast-1",
+    "s3_bucket": "your-archive-bucket",
+    "storage_class": "GLACIER_DEEP_ARCHIVE",
+    "vpc_endpoint_url": "https://s3.ap-northeast-1.amazonaws.com"
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "archive_system",
+    "user": "postgres",
+    "password": "your_password",
+    "timeout": 30
+  },
+  "request": {
+    "requester": "12345678"
+  },
+  "file_server": {
+    "archived_suffix": "_archived",
+    "exclude_extensions": [".tmp", ".lock", ".bak"]
+  },
+  "processing": {
+    "max_file_size": 10737418240,
+    "retry_count": 3
+  },
+  "logging": {
+    "log_directory": "logs"
+  }
 }
 ```
 
-### 2.3 出力仕様
+### 8.2 設定項目の最適化
 
-#### 2.3.1 ログファイル
-- **場所**: `logs/archive_YYYYMMDD_HHMMSS.log`
-- **レベル**: DEBUG（ファイル）、INFO（コンソール）
-- **形式**: `YYYY-MM-DD HH:MM:SS - logger_name - LEVEL - message`
+**削除済み設定項目**:
 
-#### 2.3.2 エラーCSVファイル
-**CSV検証エラー**: `logs/{元ファイル名}_csv_retry_YYYYMMDD_HHMMSS.csv`
-```csv
-Directory Path
-\\invalid\path1
-\\invalid\path2
+- `chunk_size`: 全スクリプトで未使用のため削除
+- `log_level`: 全スクリプトでハードコード（INFO 固定）のため削除
+
+**追加設定項目**:
+
+- `database`: PostgreSQL 接続設定
+- `request.requester`: 依頼者情報
+- `file_server.archived_suffix`: ディレクトリリネーム用接尾辞
+
+## 9. コマンドライン仕様
+
+### 9.1 実行形式
+
+```bash
+python archive_script_main.py <CSV_PATH> <REQUEST_ID> [--config CONFIG_PATH]
 ```
 
-**アーカイブエラー**: `logs/{元ファイル名}_archive_retry_YYYYMMDD_HHMMSS.csv`
-```csv
-Directory Path
-\\failed\directory1
-\\failed\directory2
+### 9.2 実行例
+
+```bash
+# 基本実行
+python archive_script_main.py archive_request.csv REQ-2025-001
+
+# 設定ファイル指定
+python archive_script_main.py archive_request.csv REQ-2025-001 --config config/custom_config.json
 ```
 
-#### 2.3.3 空ファイル
-- **場所**: 元ファイルと同じディレクトリ
-- **命名**: `{元ファイル名}_archived`
-- **内容**: 完全に空（0バイト）
+### 9.3 コマンドライン引数
 
-#### 2.3.4 データベースレコード
-```sql
-INSERT INTO archive_history (
-    request_id,           -- コマンドライン引数
-    requester,           -- 設定ファイル（8桁社員番号）
-    request_date,        -- 実行時刻
-    original_file_path,  -- 元ファイルフルパス
-    s3_path,            -- s3://bucket/key形式
-    archive_date,       -- 実行時刻
-    file_size           -- バイト数
-);
+- **CSV_PATH**: アーカイブ対象ディレクトリを記載した CSV ファイル（必須）
+- **REQUEST_ID**: アーカイブ依頼 ID（必須、データベース登録用）
+- **--config**: 設定ファイルパス（任意、デフォルト: config/archive_config.json）
+
+## 10. ログ出力仕様
+
+### 10.1 ログファイル
+
+**ファイル名**: `logs/archive_{YYYYMMDD_HHMMSS}.log`
+**フォーマット**: `{timestamp} - {name} - {level} - {message}`
+
+### 10.2 ログレベル
+
+- **INFO**: 処理状況、成功事例
+- **WARNING**: 非致命的エラー、設定変更通知
+- **ERROR**: 処理失敗、エラー事例
+- **DEBUG**: 詳細なデバッグ情報（ファイル出力のみ）
+
+### 10.3 主要ログ出力
+
+```python
+# 処理開始・完了
+logger.info(f"アーカイブ処理開始 - Request ID: {request_id}")
+logger.info("アーカイブ処理完了")
+
+# ファイル処理
+logger.info(f"[{i}/{len(files)}] アップロード中: {file_path}")
+logger.info(f"✓ アップロード成功: {s3_key}")
+logger.error(f"✗ アップロード失敗: {file_path} - {error}")
+
+# ディレクトリリネーム
+logger.info(f"✓ ディレクトリリネーム成功: {directory_path} → {archived_path}")
+logger.error(f"✗ ディレクトリリネーム失敗（権限エラー）: {directory_path}")
 ```
 
-## 3. 処理フロー仕様
+## 11. パフォーマンス仕様
 
-### 3.1 メイン処理フロー
-```
-1. 設定ファイル読み込み
-2. ログ初期化
-3. CSV読み込み・検証
-4. ファイル収集
-5. S3アップロード
-6. アーカイブ後処理
-7. データベース登録
-8. 統計情報出力
-```
+### 11.1 処理能力
 
-### 3.2 CSV検証処理
-```
-入力: CSVファイルパス
-出力: (有効ディレクトリリスト, エラー項目リスト)
+- **想定ファイル数**: 10,000-20,000 ファイル/月
+- **最大ファイルサイズ**: 10GB
+- **処理時間目安**: 1GB 当たり 5-10 分
+- **同時実行**: なし（シーケンシャル処理）
 
-1. UTF-8-SIG エンコーディングで読み込み
-2. ヘッダー行の自動検出・スキップ
-3. 各行のパス検証
-   - 長さチェック（3文字以上、260文字以下）
-   - 不正文字チェック（<>:"|?*）
-   - 存在チェック
-   - ディレクトリチェック
-   - 読み取り権限チェック
-4. エラー発生時も処理継続
-5. エラーCSV生成（エラーがある場合）
+### 11.2 最適化実装
+
+```python
+# リトライ機能付きアップロード
+def _upload_file_with_retry(self, s3_client, file_path: str,
+                           bucket_name: str, s3_key: str,
+                           storage_class: str, max_retries: int) -> Dict:
+    for attempt in range(max_retries):
+        try:
+            s3_client.upload_file(file_path, bucket_name, s3_key,
+                                ExtraArgs={'StorageClass': storage_class})
+            return {'success': True, 'error': None}
+        except Exception as e:
+            if attempt == max_retries - 1:
+                return {'success': False, 'error': f'最大リトライ回数到達: {e}'}
+            time.sleep(2 ** attempt)  # 指数バックオフ
 ```
 
-### 3.3 S3アップロード処理
-```
-入力: ファイル情報リスト
-出力: アップロード結果リスト
+## 12. 運用手順
 
-1. boto3 S3クライアント初期化
-   - VPCエンドポイント設定
-   - 接続テスト実行
-2. ストレージクラス検証・自動変換
-3. 各ファイルの処理
-   - S3キー生成（サーバ名ベース）
-   - リトライ付きアップロード（最大3回）
-   - 指数バックオフ
-4. 進捗ログ出力
-```
+### 12.1 事前準備
 
-### 3.4 アーカイブ後処理
-```
-入力: S3アップロード結果リスト
-出力: アーカイブ完了結果リスト
+1. **設定ファイル確認**: config/archive_config.json
+2. **AWS 認証設定**: IAM ロール・認証情報
+3. **データベース接続**: PostgreSQL 稼働確認
+4. **VPC エンドポイント**: S3 接続設定確認
 
-成功ファイルのみ処理:
-1. 空ファイル作成（{元ファイル名}_archived）
-2. 空ファイル作成成功確認
-3. 元ファイル削除
-4. 元ファイル削除成功確認
-5. 失敗時の自動クリーンアップ
+### 12.2 実行手順
+
+```bash
+# 1. CSVファイル準備
+cat archive_request.csv
+
+# 2. 設定ファイル確認
+python -c "import json; print(json.load(open('config/archive_config.json')))"
+
+# 3. アーカイブ処理実行
+python archive_script_main.py archive_request.csv REQ-2025-001
+
+# 4. 処理結果確認
+tail -20 logs/archive_*.log
+ls logs/*retry*.csv  # エラー時のみ
 ```
 
-### 3.5 データベース登録処理
-```
-入力: アーカイブ完了結果リスト
-出力: なし
+### 12.3 エラー時対応
 
-アーカイブ完了ファイルのみ処理:
-1. PostgreSQL接続
-2. トランザクション開始
-3. バッチ挿入（executemany）
-4. コミット
-5. 接続クローズ
+```bash
+# CSV検証エラー時
+python archive_script_main.py logs/archive_request_csv_retry_*.csv REQ-2025-001
+
+# アーカイブエラー時
+python archive_script_main.py logs/archive_request_archive_retry_*.csv REQ-2025-001-retry
 ```
 
-## 4. エラーハンドリング仕様
+## 13. テスト仕様
 
-### 4.1 エラー分類
+### 13.1 単体テスト項目
 
-| エラー種別 | 処理継続 | リトライ | エラーCSV |
-|-----------|---------|---------|-----------|
-| CSV読み込みエラー | × | - | - |
-| CSV検証エラー | ✓ | - | ✓ |
-| S3接続エラー | × | - | - |
-| S3アップロードエラー | ✓ | ✓ | ✓ |
-| ファイルアクセスエラー | ✓ | × | ✓ |
-| データベース接続エラー | ✓ | × | - |
+- CSV 読み込み・検証機能
+- ファイル収集機能
+- S3 アップロード機能
+- 元ファイル削除機能
+- ディレクトリリネーム機能
+- データベース登録機能
+- エラーハンドリング機能
 
-### 4.2 リトライ仕様
-- **対象**: S3アップロードエラー
-- **回数**: 最大3回
-- **間隔**: 指数バックオフ（2^n秒）
-- **除外**: FileNotFoundError、PermissionError
+### 13.2 結合テスト項目
 
-### 4.3 ログレベル仕様
+- エンドツーエンド処理フロー
+- エラー発生時の部分実行・再実行
+- 大量ファイル処理
+- VPC エンドポイント経由通信
 
-| レベル | 用途 | 例 |
-|--------|------|-----|
-| DEBUG | デバッグ情報 | S3キー生成詳細 |
-| INFO | 処理進捗 | ファイル収集完了 |
-| WARNING | 警告 | アップロード失敗（リトライ中） |
-| ERROR | エラー | ディレクトリが存在しません |
+### 13.3 実機検証結果
 
-## 5. パフォーマンス仕様
+✅ **Windows Server 2022**: 動作確認済み
+✅ **PostgreSQL 13**: 接続・登録確認済み
+✅ **S3 Glacier Deep Archive**: アップロード確認済み
+✅ **ディレクトリリネーム**: 権限エラー対応確認済み
 
-### 5.1 処理能力
-- **想定ファイル数**: 10,000-20,000ファイル/月
-- **最大ファイルサイズ**: 10GB（設定可能）
-- **並行処理**: なし（シーケンシャル処理）
+## 14. 制約・注意事項
 
-### 5.2 メモリ使用量
-- **ファイル情報**: 約100バイト/ファイル
-- **想定最大**: 約2MB（20,000ファイル時）
+### 14.1 技術的制約
 
-### 5.3 実行時間目安
-- **1,000ファイル**: 約5-10分
-- **10,000ファイル**: 約50-100分
+- **ファイルサイズ制限**: 10GB（設定変更可能）
+- **パス長制限**: 260 文字（Windows 制限）
+- **同時実行**: 非対応（1 プロセスのみ）
+- **復元時間**: 48 時間（Glacier Deep Archive 仕様）
 
-## 6. セキュリティ仕様
+### 14.2 運用制約
 
-### 6.1 認証
-- **AWS**: IAMロール認証
-- **PostgreSQL**: ユーザー名・パスワード認証
+- **手動実行**: 自動スケジューリング機能なし
+- **権限管理**: 運用管理者のみ実行可能
+- **バックアップ**: 実装なし（S3 アーカイブが実質的なバックアップ）
 
-### 6.2 通信暗号化
-- **S3**: HTTPS（VPCエンドポイント経由）
-- **PostgreSQL**: SSL（設定による）
+### 14.3 セキュリティ注意事項
 
-### 6.3 権限
-- **ファイルサーバ**: 読み取り・削除権限
-- **S3**: PutObject権限
-- **PostgreSQL**: INSERT権限
+- **IAM 権限**: 最小権限の原則に従った設定
+- **VPC エンドポイント**: インターネット経由を避ける推奨設定
+- **ログ保護**: 機密情報のマスキング実装済み
 
-## 7. 制約事項
+## 15. 今後の拡張予定
 
-### 7.1 システム制約
-- **並行実行**: 不可（同一ディレクトリでのファイル競合回避）
-- **ネットワーク**: VPCエンドポイント必須
-- **文字エンコーディング**: UTF-8のみサポート
+### 15.1 短期拡張（3 ヶ月以内）
 
-### 7.2 ファイル制約
-- **最大パス長**: 260文字（Windows制限）
-- **禁止文字**: `<>:"|?*`
-- **除外拡張子**: `.tmp`, `.lock`, `.bak`（設定可能）
+- [ ] 単体テストコード実装
+- [ ] プログレスバー機能
+- [ ] 並行処理対応
 
-### 7.3 運用制約
-- **復元履歴**: 記録しない
-- **削除されたファイル**: 復旧不可
-- **日本語ファイル名**: S3では問題なし、psql表示で注意
+### 15.2 中期拡張（6 ヶ月以内）
 
-## 8. 戻り値仕様
+- [ ] WebUI 連携
+- [ ] 自動スケジューリング
+- [ ] 詳細レポート機能
 
-### 8.1 終了コード
+### 15.3 長期拡張（1 年以内）
 
-| コード | 意味 | 説明 |
-|--------|------|------|
-| 0 | 正常終了 | 全処理完了 |
-| 1 | 異常終了 | 致命的エラー発生 |
+- [ ] 機械学習による異常検知
+- [ ] API 化対応
+- [ ] 多重実行制御機能
 
-### 8.2 統計情報
-```
-=== 処理統計 ===
-処理時間: 0:05:23.123456
-CSV検証エラー数: 2
-総ファイル数: 1000
-成功ファイル数: 998
-失敗ファイル数: 2
-総ファイルサイズ: 1,234,567,890 bytes
-```
+---
 
-## 9. 依存関係
-
-### 9.1 Pythonパッケージ
-```
-boto3>=1.26.0
-psycopg2-binary>=2.9.0
-```
-
-### 9.2 システム要件
-- **Python**: 3.8以上
-- **AWS CLI**: 設定済み（認証情報）
-- **PostgreSQL**: 接続可能
-- **FSx**: マウント済み
-
-## 10. 設定可能項目
-
-### 10.1 主要設定
-| 項目 | デフォルト | 説明 |
-|------|-----------|------|
-| max_file_size | 10GB | 最大ファイルサイズ |
-| retry_count | 3 | S3アップロードリトライ回数 |
-| archived_suffix | "_archived" | 空ファイルサフィックス |
-| log_level | "INFO" | ログレベル |
-| timeout | 30 | DB接続タイムアウト（秒） |
-
-### 10.2 AWS設定
-- **storage_class**: 自動変換対応（GLACIER_DEEP_ARCHIVE → DEEP_ARCHIVE）
-- **vpc_endpoint_url**: VPCエンドポイント必須
-
-## 11. 注意事項
-
-### 11.1 データ整合性
-- **アーカイブ成功**: S3アップロード + 空ファイル作成 + DB登録が全て成功
-- **部分失敗**: 各段階での失敗は個別に記録・ログ出力
-
-### 11.2 運用上の注意
-- **元ファイル削除**: 取り消し不可
-- **Glacier復元**: 12-48時間要
-- **日本語表示**: pgAdmin推奨（psqlは文字化けの可能性）
-
-### 11.3 障害対応
-- **CSV検証エラー**: 再試行用CSVで修正後実行
-- **S3エラー**: 権限・ネットワーク確認
-- **DB接続エラー**: アーカイブ自体は成功（手動DB登録可能）
+**最終更新**: 2025 年 7 月
+**バージョン**: v1.0（実装完了・実機検証済み）
+**実装状況**: ✅ 本番運用可能
